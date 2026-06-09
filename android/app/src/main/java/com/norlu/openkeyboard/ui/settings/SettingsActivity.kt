@@ -29,7 +29,7 @@ class SettingsActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 "❌ Erro ao carregar motor: ${e.message}"
             }
-            text = "\n$status\n\nPróximos passos:\n1. Vá em Configurações > Idiomas > Teclado na Tela.\n2. Gerenciar Teclados > Ative o 'Norlu Keyboard'.\n3. Abra uma barra de busca e mude o método de entrada."
+            text = "\n$status\n\nConfigurações de Aparência:\nAs cores do teclado (Tema Claro/Escuro WCAG AAA) podem ser alteradas diretamente no teclado clicando no ícone '^' no canto superior esquerdo.\n\nPróximos passos:\n1. Vá em Configurações > Idiomas > Teclado na Tela.\n2. Gerenciar Teclados > Ative o 'Norlu Keyboard'.\n3. Abra uma barra de busca e mude o método de entrada."
             textSize = 16f
             gravity = Gravity.CENTER
         }

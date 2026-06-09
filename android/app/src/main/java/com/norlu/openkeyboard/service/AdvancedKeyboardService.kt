@@ -14,6 +14,7 @@ import android.widget.FrameLayout
 import com.norlu.openkeyboard.core.RustEngineAsync
 import com.norlu.openkeyboard.security.SecureKeyManager
 import com.norlu.openkeyboard.ui.keyboard.OptimisedKeyboardView
+import com.norlu.openkeyboard.ui.keyboard.KeyboardState
 import com.norlu.openkeyboard.ui.settings.SettingsActivity
 import com.norlu.openkeyboard.utils.InputContextUtils
 
@@ -50,17 +51,37 @@ class AdvancedKeyboardService : InputMethodService() {
         isPredictionEnabled = !(variation == EditorInfo.TYPE_TEXT_VARIATION_PASSWORD || 
                                 variation == EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
                                 variation == EditorInfo.TYPE_TEXT_VARIATION_WEB_PASSWORD)
+
+        // Define o estado inicial do layout baseado no tipo de input
+        if (::keyboardView.isInitialized) {
+            val inputClass = inputType and EditorInfo.TYPE_MASK_CLASS
+            if (inputClass == EditorInfo.TYPE_CLASS_NUMBER || inputClass == EditorInfo.TYPE_CLASS_PHONE) {
+                keyboardView.setKeyboardState(KeyboardState.NUMERIC_PAD)
+            } else {
+                keyboardView.setKeyboardState(KeyboardState.ALPHA)
+            }
+        }
+
     }
 
     override fun onCreateInputView(): View {
         val root = FrameLayout(this)
         keyboardView = OptimisedKeyboardView(this)
         
+        // Aplica o tema salvo (Default: Escuro)
+        val isDark = prefs.getBoolean("norlu_theme_dark", true)
+        keyboardView.applyTheme(isDark)
+
         val params = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         )
         keyboardView.layoutParams = params
+
+        keyboardView.setOnThemeChangedListener { dark ->
+            prefs.edit().putBoolean("norlu_theme_dark", dark).apply()
+            Log.d("NorluService", "Theme persisted: dark=$dark")
+        }
 
         keyboardView.setOnSuggestionClickListener { suggestion: String ->
             Log.d("NorluService", "Suggestion clicked: $suggestion")
@@ -84,11 +105,7 @@ class AdvancedKeyboardService : InputMethodService() {
 
         keyboardView.setOnKeyClickListener { char: String ->
             Log.d("NorluService", "Key clicked: $char")
-            if (char == "⚙️") {
-                val intent = Intent(this, SettingsActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-            } else if (char == "⌫") {
+            if (char == "⌫") {
                 currentInputConnection.deleteSurroundingText(1, 0)
             } else if (char == "\n") {
                 val textBefore = currentInputConnection.getTextBeforeCursor(100, 0)?.toString() ?: ""
