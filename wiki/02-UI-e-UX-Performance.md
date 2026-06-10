@@ -21,3 +21,9 @@ Inspirado no `zsh-autosuggestions`, o teclado projeta a predição mais prováve
 
 ## 4. Máquina de Estados de Layout
 A alternância entre layouts Alpha e Numeric é feita via mudança de ponteiros de arrays de glifos, sem `Layout Inflation`. Isso garante que a troca de modo seja tão rápida quanto a taxa de atualização da tela.
+
+## 5. Sky Buffer Rendering (Pop-ups sem Clip)
+Para permitir que os pop-ups de previsualização de teclas "vazem" para fora do limite visual do teclado sem serem cortados pelo sistema de Views do Android:
+*   **Buffer Transparente**: Aumentamos a altura nominal da View (via `onMeasure`) em 100dp acima da barra de sugestões, mantendo esta área inicial transparente.
+*   **Coordinate Offsetting**: O desenho do teclado (Background e Teclas) e a lógica de detecção de toque são deslocados verticalmente por este valor.
+*   **Floating Pop-ups**: O método `drawPopup` utiliza este "céu" transparente para renderizar balões de visualização e menus de caracteres alternativos, criando um efeito de profundidade onde os elementos da UI parecem flutuar acima da interface do aplicativo.

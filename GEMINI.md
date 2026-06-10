@@ -1,4 +1,4 @@
-# Norlu Keyboard (rustkey) - Project Instructions
+# Norlu Keyboard (openkeyboard) - Project Instructions
 
 ## Project Overview
 Norlu Keyboard is a high-performance, privacy-focused Android Input Method Editor (IME) with a core engine written in Rust. It utilizes a Dual-Trie architecture for sub-millisecond fuzzy search and intelligent word prediction.

@@ -618,6 +618,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "openkeyboard"
+version = "0.1.0"
+dependencies = [
+ "android_logger",
+ "bincode",
+ "chacha20poly1305",
+ "criterion",
+ "dashmap",
+ "jni",
+ "log",
+ "rayon",
+ "serde",
+ "sled",
+ "zeroize",
+ "zstd",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -805,24 +823,6 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
-
-[[package]]
-name = "rustkey"
-version = "0.1.0"
-dependencies = [
- "android_logger",
- "bincode",
- "chacha20poly1305",
- "criterion",
- "dashmap",
- "jni",
- "log",
- "rayon",
- "serde",
- "sled",
- "zeroize",
- "zstd",
-]
 
 [[package]]
 name = "rustversion"

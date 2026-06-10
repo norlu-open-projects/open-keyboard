@@ -1,5 +1,5 @@
 [package]
-name = "rustkey"
+name = "openkeyboard"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,7 +8,7 @@ name = "keyboard_engine"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "rustkey"
+name = "openkeyboard"
 path = "src/main.rs"
 
 [[bin]]
