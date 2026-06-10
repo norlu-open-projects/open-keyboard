@@ -80,7 +80,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
     private var topBuffer: Float = 0f
     private var hapticEnabled: Boolean = true
 
-    // Long Press
+    // Long Press & Backspace Repeat
     private val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var isLongPressActive = false
     private var longPressedKey: String? = null
@@ -98,16 +98,37 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         "Y" to "6", "U" to "7", "I" to "8", "O" to "9", "P" to "0",
         "S" to "@", "N" to "!", "G" to "%", "Z" to "_", "M" to "?"
     )
+
+    private var backspaceInterval = 200L
+    private val backspaceRunnable = object : Runnable {
+        override fun run() {
+            if (pressedKey == "⌫") {
+                handleKey("⌫")
+                // Acelera a cada 200ms de execução acumulada (indiretamente via redução do intervalo)
+                if (backspaceInterval > 50L) {
+                    backspaceInterval = (backspaceInterval * 0.9f).toLong().coerceAtLeast(50L)
+                }
+                longPressHandler.postDelayed(this, backspaceInterval)
+            }
+        }
+    }
+
     private val longPressRunnable = Runnable {
         pressedKey?.let { key ->
-            val alternates = alternatesMap[key.uppercase()]
-            if (alternates != null) {
-                if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            if (key == "⌫") {
                 isLongPressActive = true
-                longPressedKey = key
-                alternateOptions = alternates
-                selectedAlternateIndex = 0 // Seleciona a tecla especial primeiro
-                invalidate()
+                backspaceInterval = 200L
+                longPressHandler.post(backspaceRunnable)
+            } else {
+                val alternates = alternatesMap[key.uppercase()]
+                if (alternates != null) {
+                    if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    isLongPressActive = true
+                    longPressedKey = key
+                    alternateOptions = alternates
+                    selectedAlternateIndex = 0 // Seleciona a tecla especial primeiro
+                    invalidate()
+                }
             }
         }
     }
@@ -124,6 +145,8 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         isFocusable = true
         updateTextSizes()
     }
+
+    fun isLongPressActive(): Boolean = isLongPressActive
 
     fun setUndoVisible(visible: Boolean) {
         if (this.isUndoVisible != visible) {
@@ -616,7 +639,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                 isLongPressActive = false
                 selectedAlternateIndex = -1
 
-                if (key != null && key.length == 1 && alternatesMap.containsKey(key.uppercase())) {
+                if (key != null && (key == "⌫" || (key.length == 1 && alternatesMap.containsKey(key.uppercase())))) {
                     longPressHandler.postDelayed(longPressRunnable, 300)
                 }
                 invalidate()
@@ -650,6 +673,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP -> {
                 longPressHandler.removeCallbacks(longPressRunnable)
+                longPressHandler.removeCallbacks(backspaceRunnable)
                 if (isLongPressActive) {
                     val finalKey = if (selectedAlternateIndex == -1) {
                         longPressedKey ?: ""
@@ -737,10 +761,45 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         val totalWeight = keys.sumOf { getKeyWeight(it).toDouble() }.toFloat()
 
         var currentX = margin
-        keys.forEach { key ->
+        for (i in keys.indices) {
+            val key = keys[i]
             val keyWeight = getKeyWeight(key)
             val keyWidth = (availableWidth / totalWeight) * keyWeight
-            if (x >= currentX && x <= currentX + keyWidth) return key
+
+            // Verifica se o toque caiu dentro da dimensão física desta tecla
+            if (x >= currentX && x <= currentX + keyWidth) {
+                // Se não for modo ALPHA ou tecla especial, retorna a tecla física
+                if (currentState != KeyboardState.ALPHA || key.length != 1) return key
+
+                // DYNAMIC HITBOXES: Mitigação de Erros (WCAG AAA)
+                val baseProb = nextCharProbabilities[key.lowercase()[0]] ?: 0.0
+
+                // Analisa "Zona de Dúvida" (25% das bordas)
+                val hitZoneLeft = currentX + (keyWidth * 0.25f)
+                val hitZoneRight = currentX + (keyWidth * 0.75f)
+
+                if (x < hitZoneLeft && i > 0) {
+                    val leftKey = keys[i - 1]
+                    if (leftKey.length == 1) {
+                        val leftProb = nextCharProbabilities[leftKey.lowercase()[0]] ?: 0.0
+                        // Se vizinho for 3x mais provável, redireciona o toque
+                        if (leftProb > baseProb * 3.0 && leftProb > 0.05) {
+                            android.util.Log.d("OpenKeyboard", "Hitbox Bias: $key -> $leftKey")
+                            return leftKey
+                        }
+                    }
+                } else if (x > hitZoneRight && i < keys.size - 1) {
+                    val rightKey = keys[i + 1]
+                    if (rightKey.length == 1) {
+                        val rightProb = nextCharProbabilities[rightKey.lowercase()[0]] ?: 0.0
+                        if (rightProb > baseProb * 3.0 && rightProb > 0.05) {
+                            android.util.Log.d("OpenKeyboard", "Hitbox Bias: $key -> $rightKey")
+                            return rightKey
+                        }
+                    }
+                }
+                return key
+            }
             currentX += keyWidth
         }
         return null

@@ -146,25 +146,26 @@ class AdvancedKeyboardService : InputMethodService() {
 
         keyboardView.setOnKeyClickListener { char: String ->
             triggerVibration()
-            Log.d("OpenKeyboard", "Key clicked: $char")
+            val ic = currentInputConnection ?: return@setOnKeyClickListener
+            
             if (char == "⌫") {
-                val textBefore = currentInputConnection.getTextBeforeCursor(100, 0)?.toString() ?: ""
-                val currentWord = textBefore.split(InputContextUtils.SPACE_REGEX).lastOrNull() ?: ""
-                
-                // Se estamos iniciando a deleção de uma palavra, salvamos a versão cheia dela
-                if (currentWord.isNotEmpty()) {
-                    if (!isDeletingSequence) {
-                        Log.d("OpenKeyboard", "Backspace: Starting deletion sequence for '$currentWord'")
+                // 1. Tenta deletar seleção primeiro (usando KeyEvents para comportamento nativo)
+                // Se houver seleção, o Android a apagará. Se não, apaga um caractere.
+                ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_DEL))
+                ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_DEL))
+
+                // 2. Lógica de Undo (apenas para deleções normais, não para a repetição rápida)
+                if (!keyboardView.isLongPressActive()) {
+                    val textBefore = ic.getTextBeforeCursor(100, 0)?.toString() ?: ""
+                    val currentWord = textBefore.split(InputContextUtils.SPACE_REGEX).lastOrNull() ?: ""
+                    if (currentWord.isNotEmpty() && !isDeletingSequence) {
                         rustEngine.pushUndo(currentWord)
                         isDeletingSequence = true
                         keyboardView.setUndoVisible(true)
+                    } else if (currentWord.isEmpty()) {
+                        isDeletingSequence = false
                     }
-                } else {
-                    // Se o campo está vazio ou acabamos de apagar um espaço, resetamos a sequência
-                    isDeletingSequence = false
                 }
-
-                currentInputConnection.deleteSurroundingText(1, 0)
                 keyboardView.setUndoVisible(rustEngine.hasUndo())
             } else if (char == "\n") {
                 isDeletingSequence = false
