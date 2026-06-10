@@ -42,19 +42,19 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         textAlign = Paint.Align.LEFT
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
-    
+
     private val iconPath = android.graphics.Path()
     private val searchPath = android.graphics.Path()
-    
+
     private val keyRect = RectF()
     private val pressedKeyRect = RectF()
-    
+
     // Definição de Layouts (4 Linhas)
     private val alphaRow1 = listOf("Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P")
     private val alphaRow2 = listOf("A", "S", "D", "F", "G", "H", "J", "K", "L")
     private val alphaRow3 = listOf("⇧", "Z", "X", "C", "V", "B", "N", "M", "⌫")
     private val alphaRow4 = listOf("?123", ",", " ", ".", "__SEARCH__")
-    
+
     private val symRow1 = listOf("[", "]", "{", "}", "/", "\\", "|", "^", "<", ">")
     private val symRow2 = listOf("@", "#", "$", "%", "&", "*", "-", "+", "=", "~")
     private val symRow3 = listOf("(", ")", "\"", "'", ":", ";", "!", "?", "⌫")
@@ -70,6 +70,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
     private var isDarkTheme = true
     private var currentState = KeyboardState.ALPHA
     private var shiftState = ShiftState.LOWER
+    private var imeAction: Int = android.view.inputmethod.EditorInfo.IME_ACTION_NONE
     private var lastShiftTime = 0L
     private var pressedKey: String? = null
     private var ghostText: String = ""
@@ -77,6 +78,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
     private var nextCharProbabilities: Map<Char, Double> = emptyMap()
     private var isUndoVisible: Boolean = false
     private var topBuffer: Float = 0f
+    private var hapticEnabled: Boolean = true
 
     // Long Press
     private val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -85,15 +87,14 @@ class OptimisedKeyboardView @JvmOverloads constructor(
     private var alternateOptions: List<String> = emptyList()
     private var selectedAlternateIndex: Int = -1 // -1 é a tecla base
     private val alternatesMap = mapOf(
-        "Q" to listOf("1"), "W" to listOf("2"), "E" to listOf("É", "Ê", "3"),
+        "Q" to listOf("1"), "W" to listOf("2"), "E" to listOf("3", "É", "Ê"),
         "R" to listOf("4"), "T" to listOf("5"), "Y" to listOf("6"),
-        "U" to listOf("Ú", "7"), "I" to listOf("Í", "8"), "O" to listOf("Ó", "Õ", "Ô", "9"),
+        "U" to listOf("7", "Ú"), "I" to listOf("8", "Í"), "O" to listOf("9", "Ó", "Õ", "Ô"),
         "P" to listOf("0"), "A" to listOf("Á", "À", "Ã", "Â"), "S" to listOf("@"),
-        "N" to listOf("!"), "G" to listOf("%"), "Z" to listOf("_"), "M" to listOf("?"),
-        "C" to listOf("Ç")
+        "N" to listOf("!"), "G" to listOf("%"), "Z" to listOf("_"), "M" to listOf("?")
     )
     private val hintMap = mapOf(
-        "Q" to "1", "W" to "2", "E" to "3", "R" to "4", "T" to "5", 
+        "Q" to "1", "W" to "2", "E" to "3", "R" to "4", "T" to "5",
         "Y" to "6", "U" to "7", "I" to "8", "O" to "9", "P" to "0",
         "S" to "@", "N" to "!", "G" to "%", "Z" to "_", "M" to "?"
     )
@@ -101,15 +102,16 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         pressedKey?.let { key ->
             val alternates = alternatesMap[key.uppercase()]
             if (alternates != null) {
+                if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                 isLongPressActive = true
                 longPressedKey = key
                 alternateOptions = alternates
-                selectedAlternateIndex = -1
+                selectedAlternateIndex = 0 // Seleciona a tecla especial primeiro
                 invalidate()
             }
         }
     }
-    
+
     // Callbacks
     private var onKeyClickListener: ((String) -> Unit)? = null
     private var onSuggestionClickListener: ((String) -> Unit)? = null
@@ -132,6 +134,10 @@ class OptimisedKeyboardView @JvmOverloads constructor(
 
     fun setOnUndoClickListener(listener: () -> Unit) {
         onUndoClickListener = listener
+    }
+
+    fun setHapticEnabled(enabled: Boolean) {
+        this.hapticEnabled = enabled
     }
 
     fun applyTheme(dark: Boolean) {
@@ -157,7 +163,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
             colorAccent = 0xFFD1D5DB.toInt()
             colorShadow = 0x33000000.toInt()
         }
-        
+
         backgroundPaint.color = colorBackground
         shadowPaint.color = colorShadow
         textPaint.color = colorText
@@ -175,6 +181,13 @@ class OptimisedKeyboardView @JvmOverloads constructor(
             " " -> 4.0f
             "⇧", "⌫", "123", "ABC", "?123", "NUM", "__SEARCH__" -> 1.5f
             else -> 1.0f
+        }
+    }
+
+    fun setImeAction(action: Int) {
+        if (this.imeAction != action) {
+            this.imeAction = action
+            invalidate()
         }
     }
 
@@ -212,12 +225,13 @@ class OptimisedKeyboardView @JvmOverloads constructor(
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val density = resources.displayMetrics.density
-        topBuffer = 100 * density
-        
+        // Reduzido de 100 para 40dp para evitar roubar espaço desnecessário da tela
+        topBuffer = 45 * density
+
         // Reduz a altura base em landscape para não ocupar a tela toda
         val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val baseHeightDp = if (isLandscape) 200f else 260f
-        
+
         val keyboardHeight = baseHeightDp * density
         setMeasuredDimension(width, (keyboardHeight + topBuffer).toInt())
     }
@@ -272,16 +286,16 @@ class OptimisedKeyboardView @JvmOverloads constructor(
     private fun drawSuggestionBar(canvas: Canvas, barHeight: Float) {
         keyPaint.color = colorAccent
         canvas.drawRect(0f, 0f, width.toFloat(), barHeight, keyPaint)
-        
+
         // Desenha o ícone minimalista à esquerda (Chevron Up Duplo "^")
         val iconSize = barHeight * 0.4f
         val startX = width * 0.05f
         val centerY = barHeight * 0.5f
-        
+
         backgroundPaint.style = Paint.Style.STROKE
         backgroundPaint.strokeWidth = 4f
         backgroundPaint.color = colorText
-        
+
         iconPath.reset()
         // Primeira seta
         iconPath.moveTo(startX, centerY + (iconSize * 0.2f))
@@ -291,7 +305,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         iconPath.moveTo(startX, centerY - (iconSize * 0.1f))
         iconPath.lineTo(startX + (iconSize / 2), centerY - (iconSize * 0.5f))
         iconPath.lineTo(startX + iconSize, centerY - (iconSize * 0.1f))
-        
+
         canvas.drawPath(iconPath, backgroundPaint)
         backgroundPaint.style = Paint.Style.FILL // Reseta
         backgroundPaint.color = colorBackground
@@ -300,16 +314,16 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         val undoButtonWidth = if (isUndoVisible) width * 0.15f else 0f
         val contentAreaWidth = (width * 0.8f) - undoButtonWidth
         val sugStartX = width * 0.15f
-        
+
         if (suggestions.isNotEmpty()) {
             val count = suggestions.size.coerceAtMost(3)
             val sugWidth = contentAreaWidth / count
-            
+
             suggestions.take(3).forEachIndexed { i, rawSug ->
                 val parts = rawSug.split(":")
                 val s = parts[0]
                 val confidence = if (parts.size > 1) parts[1].toIntOrNull() ?: 0 else 0
-                
+
                 if (confidence >= 3) {
                     textPaint.color = colorHighlight
                     textPaint.isFakeBoldText = true
@@ -333,19 +347,19 @@ class OptimisedKeyboardView @JvmOverloads constructor(
             val radius = barHeight * 0.2f
             val centerX = width * 0.90f // Mais para a esquerda (de 0.93f para 0.90f)
             val undoCenterY = barHeight * 0.5f
-            
+
             backgroundPaint.style = Paint.Style.STROKE
             backgroundPaint.strokeWidth = 4f
             backgroundPaint.color = colorText
-            
+
             iconPath.reset()
             // Seta curvada 180 graus (arco na direita)
             val rect = RectF(centerX - radius, undoCenterY - radius, centerX + radius, undoCenterY + radius)
             iconPath.arcTo(rect, 90f, -180f) // Baixo -> Direita -> Cima
-            
+
             // Haste superior da seta voltando para a esquerda
             iconPath.lineTo(centerX - (radius * 1.5f), undoCenterY - radius)
-            
+
             // Ponta da seta na extremidade esquerda (haste superior)
             val arrowX = centerX - (radius * 1.5f)
             val arrowY = undoCenterY - radius
@@ -358,7 +372,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
             backgroundPaint.color = colorBackground
         }
 
-        textPaint.color = colorText 
+        textPaint.color = colorText
         textPaint.isFakeBoldText = false
         updateTextSizes()
     }
@@ -405,14 +419,14 @@ class OptimisedKeyboardView @JvmOverloads constructor(
     private fun drawRow(canvas: Canvas, keys: List<String>, top: Float, rowHeight: Float, padding: Float, margin: Float) {
         val availableWidth = width - (margin * 2)
         val totalWeight = keys.sumOf { getKeyWeight(it).toDouble() }.toFloat()
-        
+
         var currentX = margin
         keys.forEachIndexed { _, key ->
             val keyWeight = getKeyWeight(key)
             val keyWidth = (availableWidth / totalWeight) * keyWeight
 
             keyRect.set(currentX + padding, top + padding, currentX + keyWidth - padding, top + rowHeight - padding)
-            
+
             // 1. Desenha Sombra (Elevação)
             val shadowOffset = 2f
             canvas.drawRoundRect(
@@ -423,7 +437,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
             val isShiftKey = key == "⇧"
             val isSearchKey = key == "__SEARCH__"
             val isFunction = isShiftKey || isSearchKey || key == "⌫" || key == "123" || key == "ABC" || key == "🌐" || key == "⚙️"
-            
+
             // 2. Define Cor do Fundo
             keyPaint.color = when {
                 pressedKey == key -> {
@@ -435,34 +449,49 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                 else -> colorKey
             }
             canvas.drawRoundRect(keyRect, 12f, 12f, keyPaint)
-            
+
             val cx = keyRect.centerX()
             val cy = keyRect.centerY() - ((textPaint.descent() + textPaint.ascent()) / 2)
-            
+
             if (isFunction) {
                 textPaint.textSize = if (key == "123" || key == "ABC") rowHeight * 0.4f else rowHeight * 0.5f
                 textPaint.isFakeBoldText = true
             }
 
             if (isSearchKey) {
-                val searchSize = rowHeight * 0.45f // Aumentado de 0.35f para 0.45f
+                val iconSize = rowHeight * 0.45f
                 val scx = keyRect.centerX()
                 val scy = keyRect.centerY()
-                
+
                 textPaint.style = Paint.Style.STROKE
-                textPaint.strokeWidth = 6f // Engrossado para acompanhar o tamanho
+                textPaint.strokeWidth = 6f
                 textPaint.color = colorText
-                
                 searchPath.reset()
-                // Círculo da lupa
-                searchPath.addCircle(scx - (searchSize * 0.15f), scy - (searchSize * 0.15f), searchSize * 0.42f, android.graphics.Path.Direction.CW)
-                // Cabo da lupa
-                searchPath.moveTo(scx + (searchSize * 0.12f), scy + (searchSize * 0.12f))
-                searchPath.lineTo(scx + (searchSize * 0.55f), scy + (searchSize * 0.55f))
-                
+
+                val isSearch = (imeAction == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH)
+
+                if (isSearch) {
+                    // Círculo da lupa
+                    searchPath.addCircle(scx - (iconSize * 0.15f), scy - (iconSize * 0.15f), iconSize * 0.42f, android.graphics.Path.Direction.CW)
+                    // Cabo da lupa
+                    searchPath.moveTo(scx + (iconSize * 0.12f), scy + (iconSize * 0.12f))
+                    searchPath.lineTo(scx + (iconSize * 0.55f), scy + (iconSize * 0.55f))
+                } else {
+                    // Ícone de Enter (Seta curvada)
+                    val offset = iconSize * 0.5f
+                    searchPath.moveTo(scx + offset, scy - offset)
+                    searchPath.lineTo(scx + offset, scy + offset * 0.5f)
+                    searchPath.quadTo(scx + offset, scy + offset, scx, scy + offset)
+                    searchPath.lineTo(scx - offset, scy + offset)
+                    // Ponta da seta (relativa ao tamanho do ícone)
+                    val arrowHeadSize = iconSize * 0.3f
+                    searchPath.moveTo(scx - offset + arrowHeadSize, scy + offset - arrowHeadSize)
+                    searchPath.lineTo(scx - offset, scy + offset)
+                    searchPath.lineTo(scx - offset + arrowHeadSize, scy + offset + arrowHeadSize)
+                }
+
                 canvas.drawPath(searchPath, textPaint)
-                
-                textPaint.style = Paint.Style.FILL // Reseta
+                textPaint.style = Paint.Style.FILL
                 textPaint.strokeWidth = 0f
             } else {
                 val displayText = when {
@@ -472,7 +501,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                 }
                 canvas.drawText(displayText, cx, cy, textPaint)
             }
-            
+
             // 3. Desenha Hint (Símbolo/Número no canto)
             if (currentState == KeyboardState.ALPHA && key.length == 1) {
                 hintMap[key.uppercase()]?.let { hint ->
@@ -480,13 +509,13 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                     textPaint.textSize = hintSize
                     textPaint.color = colorGhost
                     textPaint.isFakeBoldText = false
-                    
+
                     val hx = keyRect.right - 10f
                     val hy = keyRect.top + hintSize + 4f
-                    
+
                     textPaint.textAlign = Paint.Align.RIGHT
                     canvas.drawText(hint, hx, hy, textPaint)
-                    
+
                     // Reseta paint para a próxima tecla
                     textPaint.textAlign = Paint.Align.CENTER
                     textPaint.color = colorText
@@ -498,7 +527,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                 updateTextSizes()
                 textPaint.isFakeBoldText = false
             }
-            
+
             currentX += keyWidth
         }
     }
@@ -515,14 +544,14 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         if (isLongPressActive) {
             val totalOptions = alternateOptions.size + 1
             val fullPopupWidth = popupWidth * totalOptions
-            
+
             var popupLeft = pressedKeyRect.centerX() - (fullPopupWidth / 2)
             // Impede que o popup saia da tela lateralmente
             if (popupLeft < 10f) popupLeft = 10f
             if (popupLeft + fullPopupWidth > width - 10f) popupLeft = width - fullPopupWidth - 10f
-            
+
             val popupRect = RectF(popupLeft, popupTop, popupLeft + fullPopupWidth, popupTop + popupHeight)
-            
+
             // Sombra
             canvas.drawRoundRect(popupRect.left, popupRect.top + 8f, popupRect.right, popupRect.bottom + 8f, 20f, 20f, shadowPaint)
             // Fundo
@@ -536,7 +565,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
             for (i in 0 until totalOptions) {
                 val optionX = popupLeft + (i * popupWidth) + (popupWidth / 2)
                 val isSelected = (i - 1 == selectedAlternateIndex)
-                
+
                 if (isSelected) {
                     keyPaint.color = colorHighlight
                     val selRect = RectF(popupLeft + (i * popupWidth), popupTop, popupLeft + ((i + 1) * popupWidth), popupTop + popupHeight)
@@ -552,7 +581,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                     val alt = alternateOptions[i - 1]
                     if (shiftState != ShiftState.LOWER) alt.uppercase() else alt.lowercase()
                 }
-                
+
                 canvas.drawText(text, optionX, cy, textPaint)
             }
             textPaint.textSize = originalSize
@@ -560,21 +589,21 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         } else {
             val popupLeft = pressedKeyRect.centerX() - (popupWidth / 2)
             val popupRect = RectF(popupLeft, popupTop, popupLeft + popupWidth, popupTop + popupHeight)
-            
+
             // Sombra do Pop-up
             canvas.drawRoundRect(popupRect.left, popupRect.top + 8f, popupRect.right, popupRect.bottom + 8f, 20f, 20f, shadowPaint)
-            
+
             // Fundo do Pop-up
             keyPaint.color = colorKeyPushed
             canvas.drawRoundRect(popupRect, 20f, 20f, keyPaint)
-            
+
             // Texto do Pop-up
             val originalSize = textPaint.textSize
             textPaint.textSize = popupHeight * 0.6f
             val displayText = if (shiftState != ShiftState.LOWER) key.uppercase() else key.lowercase()
             val cy = popupRect.centerY() - ((textPaint.descent() + textPaint.ascent()) / 2)
             canvas.drawText(displayText, popupRect.centerX(), cy, textPaint)
-            
+
             textPaint.textSize = originalSize
         }
     }
@@ -586,7 +615,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                 pressedKey = key
                 isLongPressActive = false
                 selectedAlternateIndex = -1
-                
+
                 if (key != null && key.length == 1 && alternatesMap.containsKey(key.uppercase())) {
                     longPressHandler.postDelayed(longPressRunnable, 300)
                 }
@@ -598,13 +627,14 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                     val totalOptions = alternateOptions.size + 1
                     val fullPopupWidth = popupWidth * totalOptions
                     val popupLeft = pressedKeyRect.centerX() - (fullPopupWidth / 2)
-                    
+
                     val relativeX = event.x - popupLeft
                     val index = (relativeX / popupWidth).toInt().coerceIn(0, totalOptions - 1)
-                    
+
                     // Ajuste de índice: 0 é a base, 1..N são os alternativos
-                    val newIndex = index - 1 
+                    val newIndex = index - 1
                     if (newIndex != selectedAlternateIndex) {
+                        if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
                         selectedAlternateIndex = newIndex
                         invalidate()
                     }
@@ -652,7 +682,7 @@ class OptimisedKeyboardView @JvmOverloads constructor(
 
         val totalHeight = height.toFloat() - topBuffer
         val suggestionBarHeight = totalHeight * 0.15f
-        
+
         if (y < suggestionBarHeight) {
             return when {
                 x < width * 0.15f -> "__SETTINGS_TOGGLE__"
@@ -688,13 +718,13 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         }
         val keyboardAreaHeight = totalHeight - suggestionBarHeight
         val rowIndex = ((y - suggestionBarHeight) / (keyboardAreaHeight / 4f)).toInt().coerceIn(0, 3)
-        
+
         val keys = when (currentState) {
             KeyboardState.ALPHA -> listOf(alphaRow1, alphaRow2, alphaRow3, alphaRow4)[rowIndex]
             KeyboardState.SYMBOLS -> listOf(symRow1, symRow2, symRow3, symRow4)[rowIndex]
             KeyboardState.NUMERIC_PAD -> listOf(padRow1, padRow2, padRow3, padRow4)[rowIndex]
         }
-        
+
         val margin = if (currentState == KeyboardState.ALPHA) {
             when (rowIndex) {
                 1 -> width * 0.05f
@@ -702,10 +732,10 @@ class OptimisedKeyboardView @JvmOverloads constructor(
                 else -> 0f
             }
         } else 0f
-        
+
         val availableWidth = width - (margin * 2)
         val totalWeight = keys.sumOf { getKeyWeight(it).toDouble() }.toFloat()
-        
+
         var currentX = margin
         keys.forEach { key ->
             val keyWeight = getKeyWeight(key)
@@ -729,13 +759,23 @@ class OptimisedKeyboardView @JvmOverloads constructor(
 
         when (key) {
             "__UNDO__" -> onUndoClickListener?.invoke()
-            "__SETTINGS_TOGGLE__" -> { isSettingsOpen = !isSettingsOpen; invalidate() }
-            "__SETTINGS_CLOSE__" -> { isSettingsOpen = false; invalidate() }
+            "__SETTINGS_TOGGLE__" -> {
+                if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                isSettingsOpen = !isSettingsOpen
+                invalidate()
+            }
+            "__SETTINGS_CLOSE__" -> {
+                if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                isSettingsOpen = false
+                invalidate()
+            }
             "__THEME_LIGHT__" -> {
+                if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                 applyTheme(false)
                 onThemeChangedListener?.invoke(false)
             }
             "__THEME_DARK__" -> {
+                if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                 applyTheme(true)
                 onThemeChangedListener?.invoke(true)
             }

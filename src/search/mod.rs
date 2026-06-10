@@ -81,7 +81,11 @@ impl KeyboardEngine {
         // --- SCORING & FINAL RANKING ---
         let mut results = Vec::new();
         for (candidate, (distance, base_freq, match_level)) in candidates {
-            let last_used = self.recency.get_last_used(&candidate);
+            let last_used = if let Ok(recency) = self.recency.read() {
+                recency.get_last_used(&candidate)
+            } else {
+                None
+            };
             let score = self.scoring.calculate_score(base_freq, last_used, match_level);
             
             // Penaliza distância no score final para predição de palavras (não NWP)

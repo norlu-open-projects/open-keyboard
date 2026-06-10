@@ -1,18 +1,18 @@
 package lab.norlu.openkeyboard.core
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 
 class RustEngineAsync(private val storagePath: String, private val secureKey: ByteArray) {
     private var nativeEnginePtr: Long = 0
     private var isReady = false
+    
+    // Escopo estruturado para gerenciar o ciclo de vida das operações nativas
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     init {
         // Inicializa o core nativo sem travar a Main Thread da UI
-        CoroutineScope(Dispatchers.IO).launch {
+        scope.launch(Dispatchers.IO) {
             try {
                 System.loadLibrary("keyboard_engine")
                 nativeEnginePtr = initEngine(storagePath, secureKey)
@@ -26,27 +26,29 @@ class RustEngineAsync(private val storagePath: String, private val secureKey: By
 
     fun getPredictions(text: String, context: Array<String>, callback: (Array<String>) -> Unit) {
         if (!isReady || nativeEnginePtr == 0L) {
-            Log.w("RustEngineAsync", "Engine not ready for predictions (ready=$isReady, ptr=$nativeEnginePtr)")
             callback(emptyArray())
             return
         }
         
-        CoroutineScope(Dispatchers.Default).launch {
-            val results = getSuggestions(nativeEnginePtr, text, context)
-            withContext(Dispatchers.Main) {
-                callback(results)
+        scope.launch {
+            val results = withContext(Dispatchers.Default) {
+                getSuggestions(nativeEnginePtr, text, context)
             }
+            callback(results)
         }
     }
 
     fun learnWord(word: String, context: Array<String>) {
         if (!isReady || nativeEnginePtr == 0L || word.isEmpty()) return
-        CoroutineScope(Dispatchers.Default).launch {
+        scope.launch(Dispatchers.Default) {
             learnWord(nativeEnginePtr, word, context)
         }
     }
 
     fun close() {
+        // Cancela todas as corotinas pendentes (buscas, aprendizado, etc)
+        scope.cancel()
+        
         if (nativeEnginePtr != 0L) {
             destroyEngine(nativeEnginePtr)
             nativeEnginePtr = 0L
@@ -59,17 +61,17 @@ class RustEngineAsync(private val storagePath: String, private val secureKey: By
             callback(emptyArray())
             return
         }
-        CoroutineScope(Dispatchers.Default).launch {
-            val results = getNextCharProbabilities(nativeEnginePtr, prefix)
-            withContext(Dispatchers.Main) {
-                callback(results)
+        scope.launch {
+            val results = withContext(Dispatchers.Default) {
+                getNextCharProbabilities(nativeEnginePtr, prefix)
             }
+            callback(results)
         }
     }
 
     fun runMaintenance(survivalThreshold: Double) {
         if (!isReady || nativeEnginePtr == 0L) return
-        CoroutineScope(Dispatchers.IO).launch {
+        scope.launch(Dispatchers.IO) {
             runMaintenance(nativeEnginePtr, survivalThreshold)
         }
     }

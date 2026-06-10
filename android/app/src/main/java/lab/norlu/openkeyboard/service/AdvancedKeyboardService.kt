@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.inputmethodservice.InputMethodService
 import android.util.Log
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -37,28 +38,52 @@ class AdvancedKeyboardService : InputMethodService() {
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
-        
+
         // Proteção Anti-Screenshot Permanente (Opinião do App)
         window?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         Log.i("OpenKeyboard", "FLAG_SECURE enforced for this input session.")
 
         val inputType = attribute?.inputType ?: 0
         val variation = inputType and EditorInfo.TYPE_MASK_VARIATION
-        
-        isPredictionEnabled = !(variation == EditorInfo.TYPE_TEXT_VARIATION_PASSWORD || 
+        val isMultiLine = (inputType and EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+
+        isPredictionEnabled = !(variation == EditorInfo.TYPE_TEXT_VARIATION_PASSWORD ||
                                 variation == EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
                                 variation == EditorInfo.TYPE_TEXT_VARIATION_WEB_PASSWORD)
 
         // Define o estado inicial do layout baseado no tipo de input
         if (::keyboardView.isInitialized) {
+            val imeOptions = attribute?.imeOptions ?: 0
+            val action = imeOptions and EditorInfo.IME_MASK_ACTION
+
+            // Se for multi-linha, forçamos o ícone de Enter (None) para indicar quebra de linha
+            if (isMultiLine) {
+                keyboardView.setImeAction(EditorInfo.IME_ACTION_NONE)
+            } else {
+                keyboardView.setImeAction(action)
+            }
+
             val inputClass = inputType and EditorInfo.TYPE_MASK_CLASS
+
             if (inputClass == EditorInfo.TYPE_CLASS_NUMBER || inputClass == EditorInfo.TYPE_CLASS_PHONE) {
                 keyboardView.setKeyboardState(KeyboardState.NUMERIC_PAD)
             } else {
                 keyboardView.setKeyboardState(KeyboardState.ALPHA)
             }
+            
+            // Atualiza preferência de vibração
+            keyboardView.setHapticEnabled(prefs.getBoolean("norlu_haptic_enabled", true))
         }
 
+    }
+
+    override fun onEvaluateFullscreenMode(): Boolean {
+        // Nunca entra em modo tela cheia, mantendo o app original visível atrás do teclado
+        return false
+    }
+
+    override fun onEvaluateInputViewShown(): Boolean {
+        return true
     }
 
     override fun onCreateInputView(): View {
@@ -68,6 +93,9 @@ class AdvancedKeyboardService : InputMethodService() {
         // Aplica o tema salvo (Default: Escuro)
         val isDark = prefs.getBoolean("norlu_theme_dark", true)
         keyboardView.applyTheme(isDark)
+        
+        // Sincroniza preferência de vibração
+        keyboardView.setHapticEnabled(prefs.getBoolean("norlu_haptic_enabled", true))
 
         val params = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -93,6 +121,7 @@ class AdvancedKeyboardService : InputMethodService() {
         }
 
         keyboardView.setOnSuggestionClickListener { suggestion: String ->
+            triggerVibration()
             Log.d("OpenKeyboard", "Suggestion clicked: $suggestion")
             val textBefore = currentInputConnection.getTextBeforeCursor(100, 0)?.toString() ?: ""
             val lastWord = if (textBefore.endsWith(" ")) "" else textBefore.split(InputContextUtils.SPACE_REGEX).lastOrNull() ?: ""
@@ -101,10 +130,10 @@ class AdvancedKeyboardService : InputMethodService() {
             if (lastWord.isNotEmpty()) {
                 rustEngine.pushUndo(lastWord)
                 keyboardView.setUndoVisible(true)
-                currentInputConnection.deleteSurroundingText(lastWord.length, 0)
+                currentInputConnection?.deleteSurroundingText(lastWord.length, 0)
             }
             isDeletingSequence = false
-            currentInputConnection.commitText("$suggestion ", 1)
+            currentInputConnection?.commitText("$suggestion ", 1)
             
             // Aprende a palavra selecionada
             rustEngine.learnWord(suggestion, InputContextUtils.getCurrentContext(textBefore, skipLast = lastWord.isNotEmpty()))
@@ -116,6 +145,7 @@ class AdvancedKeyboardService : InputMethodService() {
         }
 
         keyboardView.setOnKeyClickListener { char: String ->
+            triggerVibration()
             Log.d("OpenKeyboard", "Key clicked: $char")
             if (char == "⌫") {
                 val textBefore = currentInputConnection.getTextBeforeCursor(100, 0)?.toString() ?: ""
@@ -138,7 +168,7 @@ class AdvancedKeyboardService : InputMethodService() {
                 keyboardView.setUndoVisible(rustEngine.hasUndo())
             } else if (char == "\n") {
                 isDeletingSequence = false
-                val textBefore = currentInputConnection.getTextBeforeCursor(100, 0)?.toString() ?: ""
+                val textBefore = currentInputConnection?.getTextBeforeCursor(100, 0)?.toString() ?: ""
                 val rawLastWord = textBefore.split(InputContextUtils.SPACE_REGEX).lastOrNull { it.isNotEmpty() } ?: ""
                 val cleanLastWord = rawLastWord.replace(InputContextUtils.PUNCTUATION_REGEX, "")
                 
@@ -146,15 +176,20 @@ class AdvancedKeyboardService : InputMethodService() {
                     rustEngine.learnWord(cleanLastWord, InputContextUtils.getCurrentContext(textBefore, skipLast = true))
                 }
 
-                val action = currentInputEditorInfo.imeOptions and EditorInfo.IME_MASK_ACTION
-                if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
-                    currentInputConnection.performEditorAction(action)
+                val editorInfo = currentInputEditorInfo
+                val inputType = editorInfo?.inputType ?: 0
+                val isMultiLine = (inputType and EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+                val action = if (editorInfo != null) editorInfo.imeOptions and EditorInfo.IME_MASK_ACTION else EditorInfo.IME_ACTION_NONE
+
+                if (!isMultiLine && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
+                    currentInputConnection?.performEditorAction(action)
                 } else {
-                    currentInputConnection.commitText("\n", 1)
+                    currentInputConnection?.commitText("\n", 1)
                 }
+
             } else if (char == " ") {
                 isDeletingSequence = false
-                val textBefore = currentInputConnection.getTextBeforeCursor(100, 0)?.toString() ?: ""
+                val textBefore = currentInputConnection?.getTextBeforeCursor(100, 0)?.toString() ?: ""
                 val rawLastWord = textBefore.split(InputContextUtils.SPACE_REGEX).lastOrNull { it.isNotEmpty() } ?: ""
                 val cleanLastWord = rawLastWord.replace(InputContextUtils.PUNCTUATION_REGEX, "")
                 
@@ -181,10 +216,12 @@ class AdvancedKeyboardService : InputMethodService() {
         }
 
         keyboardView.setOnGlobeClickListener {
+            triggerVibration()
             switchToNextInputMethod()
         }
 
         keyboardView.setOnUndoClickListener {
+            triggerVibration()
             performUndo()
         }
 
@@ -236,6 +273,12 @@ class AdvancedKeyboardService : InputMethodService() {
         }
     }
 
+    private fun triggerVibration() {
+        if (prefs.getBoolean("norlu_haptic_enabled", true)) {
+            keyboardView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        }
+    }
+
     override fun onFinishInput() {
         super.onFinishInput()
         // Aciona a manutenção de entropia ao fechar o teclado
@@ -244,6 +287,8 @@ class AdvancedKeyboardService : InputMethodService() {
         isDeletingSequence = false
         if (::keyboardView.isInitialized) {
             keyboardView.setUndoVisible(false)
+            keyboardView.setSuggestions(emptyArray())
+            keyboardView.setGhostText("")
         }
     }
 

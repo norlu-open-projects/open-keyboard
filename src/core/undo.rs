@@ -86,8 +86,12 @@ impl UndoManager {
     /// Limpa toda a pilha e aplica Zeroize.
     pub fn clear(&self) {
         if let Ok(mut stack) = self.stack.write() {
-            for mut item in stack.drain(..) {
-                item.zeroize();
+            let count = stack.len();
+            if count > 0 {
+                log::info!("Undo: Limpando pilha de sessão ({} itens). Aplicando Zeroize na RAM...", count);
+                for mut item in stack.drain(..) {
+                    item.zeroize();
+                }
             }
         }
     }
@@ -97,5 +101,6 @@ impl Drop for UndoManager {
     fn drop(&mut self) {
         self.clear();
         self.session_key.zeroize();
+        log::info!("Undo: Chave de sessão efêmera zeroizada e recursos liberados.");
     }
 }

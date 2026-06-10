@@ -53,12 +53,15 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getSug
 
     // Converte context (String[]) para Vec<String>
     let mut context_rust = Vec::new();
-    let len = env.get_array_length(&context).unwrap_or(0);
-    for i in 0..len {
-        if let Ok(obj) = env.get_object_array_element(&context, i) {
-            let j_str: JString = obj.into();
-            if let Ok(s) = env.get_string(&j_str) {
-                context_rust.push(s.into());
+    if !context.is_null() {
+        if let Ok(len) = env.get_array_length(&context) {
+            for i in 0..len {
+                if let Ok(obj) = env.get_object_array_element(&context, i) {
+                    let j_str: JString = obj.into();
+                    if let Ok(s) = env.get_string(&j_str) {
+                        context_rust.push(s.into());
+                    }
+                }
             }
         }
     }
@@ -75,21 +78,22 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getSug
     let results = engine.search_smart(&input_rust, &context_rust, max_distance);
     
     // Converte o Vec de resultados para um String[] do Java (Limitado a 10)
-    // Formato: "palavra:match_level" (ex: "gosto:3")
     let suggestions: Vec<String> = results.into_iter()
         .take(10)
         .map(|(s, _, _, match_level)| format!("{}:{}", s, match_level))
         .collect();
 
+    let fallback_str = env.new_string("").unwrap_or_else(|_| env.new_string("ERR").unwrap());
     let array = match env.new_object_array(
         suggestions.len() as i32,
         "java/lang/String",
-        env.new_string("").unwrap_or_else(|_| env.new_string("ERR").unwrap()),
+        &fallback_str,
     ) {
         Ok(a) => a,
         Err(e) => {
             log::error!("Failed to create object array: {:?}", e);
-            return std::ptr::null_mut();
+            // Retorna array vazio em caso de falha crítica na JNI em vez de null
+            return env.new_object_array(0, "java/lang/String", &fallback_str).unwrap().into_raw();
         }
     };
 
@@ -152,7 +156,10 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_destro
 ) {
     if engine_ptr != 0 {
         unsafe {
-            let _ = Box::from_raw(engine_ptr as *mut KeyboardEngine);
+            log::info!("FFI: Iniciando destruição ordenada do motor nativo...");
+            let engine = Box::from_raw(engine_ptr as *mut KeyboardEngine);
+            engine.flush();
+            log::info!("FFI: Motor nativo destruído e memória liberada.");
         }
     }
 }
@@ -178,15 +185,16 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getNex
         .map(|(c, p)| format!("{}:{}", c, p))
         .collect();
 
+    let fallback_str = env.new_string("").unwrap_or_else(|_| env.new_string("ERR").unwrap());
     let array = match env.new_object_array(
         prob_strings.len() as i32,
         "java/lang/String",
-        env.new_string("").unwrap_or_else(|_| env.new_string("ERR").unwrap()),
+        &fallback_str,
     ) {
         Ok(a) => a,
         Err(e) => {
             log::error!("Failed to create probabilities array: {:?}", e);
-            return std::ptr::null_mut();
+            return env.new_object_array(0, "java/lang/String", &fallback_str).unwrap().into_raw();
         }
     };
 

@@ -44,7 +44,17 @@ impl StorageManager {
         
         // Criptografia ChaCha20Poly1305
         let cipher = ChaCha20Poly1305::new(&self.cipher_key.into());
-        let nonce = Nonce::from_slice(b"unique_nonce"); 
+        
+        // Nonce derivado do hash da palavra para ser determinístico mas único por entrada
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        delta.word.hash(&mut hasher);
+        let hash_val = hasher.finish();
+        
+        let mut n_bytes = [0u8; 12];
+        n_bytes[0..8].copy_from_slice(&hash_val.to_le_bytes());
+        let nonce = Nonce::from_slice(&n_bytes); 
         
         let ciphertext = cipher.encrypt(nonce, compressed.as_ref())
             .map_err(|e| format!("Encryption failure: {:?}", e))?;
@@ -58,11 +68,21 @@ impl StorageManager {
     pub fn load_all_deltas(&self) -> Result<Vec<UserDataDelta>, Box<dyn std::error::Error>> {
         let mut deltas = Vec::new();
         let cipher = ChaCha20Poly1305::new(&self.cipher_key.into());
-        let nonce = Nonce::from_slice(b"unique_nonce");
 
         for item in self.db.iter() {
-            let (_, value) = item?;
-            
+            let (key_bytes, value) = item?;
+            let word = std::str::from_utf8(&key_bytes)?;
+
+            // Reconstrói o nonce a partir da chave (palavra)
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            word.hash(&mut hasher);
+            let hash_val = hasher.finish();
+            let mut n_bytes = [0u8; 12];
+            n_bytes[0..8].copy_from_slice(&hash_val.to_le_bytes());
+            let nonce = Nonce::from_slice(&n_bytes);
+
             // Descriptografia
             let decrypted = cipher.decrypt(nonce, value.as_ref())
                 .map_err(|_| "Decryption failure")?;
@@ -92,6 +112,7 @@ impl StorageManager {
 
 impl Drop for StorageManager {
     fn drop(&mut self) {
+        log::info!("Storage: Fechando banco de dados sled e zeroizando chave em RAM...");
         self.cipher_key.zeroize();
     }
 }

@@ -16,7 +16,7 @@ pub struct KeyboardEngine {
     pub static_root: TrieNode,
     pub user_root: RwLock<TrieNode>,
     pub scoring: ScoringEngine,
-    pub recency: RecencyCache,
+    pub recency: RwLock<RecencyCache>,
     /// Mapa de frases estáticas: Contexto (ex: "a dona") -> Lista de (Próxima Palavra, Frequência)
     pub static_phrases: HashMap<Box<str>, Vec<(Box<str>, u32)>>,
     /// Memória de frases do usuário: Mesma estrutura que static_phrases
@@ -32,7 +32,7 @@ impl KeyboardEngine {
             static_root: TrieNode::default(),
             user_root: RwLock::new(TrieNode::default()),
             scoring: ScoringEngine::default(),
-            recency: RecencyCache::new(1000),
+            recency: RwLock::new(RecencyCache::new(1000)),
             static_phrases: HashMap::new(),
             phrase_memory: RwLock::new(HashMap::new()),
             storage: None,
@@ -53,7 +53,7 @@ impl KeyboardEngine {
             static_root: TrieNode::default(),
             user_root: RwLock::new(TrieNode::default()),
             scoring: ScoringEngine::default(),
-            recency: RecencyCache::new(1000),
+            recency: RwLock::new(RecencyCache::new(1000)),
             static_phrases: HashMap::new(),
             phrase_memory: RwLock::new(HashMap::new()),
             storage,
@@ -91,6 +91,11 @@ impl KeyboardEngine {
     pub fn learn_word(&self, word: &str, context: &[String]) {
         log::debug!("Core: Aprendendo palavra '{}' com contexto {:?}", word, context);
         self.learn_word_internal(word, 1);
+
+        // Atualiza a recência da palavra
+        if let Ok(mut recency) = self.recency.write() {
+            recency.use_word(word.to_string());
+        }
 
         // Aprende e incrementa frases na memória
         if let Ok(mut phrases_map) = self.phrase_memory.write() {
@@ -178,7 +183,11 @@ impl KeyboardEngine {
         to_remove: &mut Vec<String>,
     ) {
         if node.is_terminal {
-            let last_used = self.recency.get_last_used(current_word);
+            let last_used = if let Ok(recency) = self.recency.read() {
+                recency.get_last_used(current_word)
+            } else {
+                None
+            };
             let score = self.scoring.calculate_score(node.base_frequency, last_used, 0);
             
             if score < threshold {
@@ -220,5 +229,13 @@ impl KeyboardEngine {
             return node.children.is_empty();
         }
         false
+    }
+
+    /// Garante que todos os dados pendentes sejam gravados no disco.
+    pub fn flush(&self) {
+        if let Some(ref mgr) = self.storage {
+            log::info!("Core: Sincronizando banco de dados com o disco (Flush)...");
+            let _ = mgr.flush();
+        }
     }
 }

@@ -14,18 +14,24 @@ A busca por correções utiliza a **Distância de Levenshtein** com uma otimiza�
 *   **Poda (Pruning)**: Se o menor valor na linha atual da matriz exceder o limite `k` (distância máxima), o ramo inteiro da árvore é descartado instantaneamente.
 *   **Performance**: Este método permite realizar buscas em dicionários de 100k+ palavras em aproximadamente **500 nanosegundos**.
 
-## 3. Scoring Multissinal
-A classificação das sugestões não se baseia apenas na distância de edição, mas em um modelo probabilístico:
+## 3. Scoring e Recência
+A classificação das sugestões baseia-se em um modelo de múltiplos sinais:
 *   **Frequência Base**: Popularidade intrínseca da palavra.
-*   **Recência (Decaimento Exponencial)**: Palavras usadas recentemente ganham um boost temporário que decai conforme a fórmula $e^{-\lambda \Delta t}$.
+*   **RecencyCache**: Um cache LRU protegido por `RwLock` que rastreia o uso recente.
+*   **Decaimento Exponencial**: Palavras recentes ganham um boost que decai conforme $e^{-\lambda \Delta t}$.
 *   **Contexto (N-Gramas)**: Probabilidade condicional baseada na palavra anterior $P(W_n | W_{n-1})$.
 
-## 4. Próximas Probabilidades (Dynamic Hitboxes)
-O motor expõe uma API que calcula a probabilidade dos próximos caracteres possíveis. Isso permite que a UI "preveja" onde o usuário provavelmente tocará, permitindo a implementação de áreas de toque dinâmicas que compensam erros físicos de paralaxe.
+## 4. Gerenciamento de Concorrência
+Para garantir a responsividade, o motor é inerentemente thread-safe:
+*   **RwLock em Componentes Críticos**: Tanto a `User Trie` quanto o `RecencyCache` e a memória de frases utilizam travas de leitura/escrita. Isso permite que predições (leituras) ocorram em paralelo, enquanto manutenções e aprendizados (escritas) são sincronizados.
 
-## 5. Sistema de Undo Seguro (Encrypted Session Stack)
-O motor implementa um sistema de "Undo" para palavras deletadas ou auto-corrigidas, focado em segurança máxima:
-*   **Encrypted LIFO Stack**: Armazena até 50 palavras em uma `VecDeque` protegida por `RwLock`.
-*   **Criptografia ChaCha20Poly1305**: Cada palavra é criptografada individualmente antes de ser armazenada na RAM, usando uma chave de sessão efêmera e nonces incrementais.
-*   **Zeroize**: Ao final de cada sessão (teclado fechado), a pilha é limpa e a memória é explicitamente preenchida com zeros usando a trait `Zeroize`, garantindo que resíduos de texto deletado não persistam na memória volátil.
-*   **Isolamento**: A lógica de Undo é desacoplada do motor de aprendizado para evitar que palavras "desfeitas" poluam o modelo de predição do usuário.
+## 5. Armazenamento Seguro (Storage Layer)
+O vocabulário do usuário é persistido usando `sled` com encriptação de ponta:
+*   **ChaCha20Poly1305**: Criptografia autenticada para cada entrada.
+*   **Nonce Determinístico Único**: Cada palavra gera seu próprio nonce derivado de um hash (Key-Based Nonce), impedindo a reutilização de fluxo de bytes (keystream reuse) e ataques de análise estatística.
+*   **Direct Boot Awareness**: O motor é capaz de iniciar em modo de leitura apenas (Static Trie) antes do desbloqueio da chave mestra do usuário.
+
+## 6. Sistema de Undo Seguro (Encrypted Session Stack)
+O motor implementa um sistema de "Undo" focado em segurança máxima:
+*   **Encrypted LIFO Stack**: Armazena até 50 palavras em RAM.
+*   **Zeroize**: A memória é explicitamente preenchida com zeros ao final de cada sessão, garantindo que nenhum resíduo de texto persista na memória volátil.

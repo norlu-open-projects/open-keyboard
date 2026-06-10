@@ -59,6 +59,26 @@ class SettingsActivity : AppCompatActivity() {
         val motorStatus = TextView(this).apply {
             text = statusText
             textSize = 16f
+            setPadding(0, 0, 0, 32)
+        }
+
+        // Opções Adicionais
+        val optionsHeader = TextView(this).apply {
+            text = "PREFERÊNCIAS"
+            textSize = 14f
+            setTextColor(Color.GRAY)
+            setPadding(0, 32, 0, 16)
+        }
+
+        val prefs = getSharedPreferences("norlu_prefs", Context.MODE_PRIVATE)
+        val hapticSwitch = Switch(this).apply {
+            text = "Feedback Tátil ao Digitar"
+            textSize = 16f
+            isChecked = prefs.getBoolean("norlu_haptic_enabled", true)
+            setPadding(0, 16, 0, 16)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("norlu_haptic_enabled", isChecked).apply()
+            }
         }
         
         layout.addView(title)
@@ -66,6 +86,8 @@ class SettingsActivity : AppCompatActivity() {
         layout.addView(secureDesc)
         layout.addView(motorHeader)
         layout.addView(motorStatus)
+        layout.addView(optionsHeader)
+        layout.addView(hapticSwitch)
         
         setContentView(layout)
     }
