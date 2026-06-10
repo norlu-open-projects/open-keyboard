@@ -1,6 +1,8 @@
 //! Orquestração do Motor de Teclado (Core).
 //! Gerencia o ciclo de vida, persistência e integração entre as Tries e o Storage.
 
+pub mod undo;
+
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::path::Path;
@@ -8,6 +10,7 @@ use crate::search::scoring::{ScoringEngine, RecencyCache};
 use crate::trie::TrieNode;
 use crate::dictionary::load_default_dictionary;
 use crate::storage::{StorageManager, UserDataDelta};
+use crate::core::undo::UndoManager;
 
 pub struct KeyboardEngine {
     pub static_root: TrieNode,
@@ -19,6 +22,7 @@ pub struct KeyboardEngine {
     /// Memória de frases do usuário: Mesma estrutura que static_phrases
     pub phrase_memory: RwLock<HashMap<String, Vec<(String, u32)>>>,
     pub storage: Option<StorageManager>,
+    pub undo: UndoManager,
 }
 
 impl KeyboardEngine {
@@ -32,11 +36,18 @@ impl KeyboardEngine {
             static_phrases: HashMap::new(),
             phrase_memory: RwLock::new(HashMap::new()),
             storage: None,
+            undo: UndoManager::new([0u8; 32]),
         }
     }
 
     pub fn new_with_storage<P: AsRef<Path>>(path: P, key: [u8; 32]) -> Self {
         log::debug!("Core: Inicializando motor com storage em {:?}", path.as_ref());
+        
+        // Deriva uma chave de sessão para o UndoManager a partir da chave mestra (SHA256 simplificado aqui ou apenas XOR)
+        // Para este projeto, usaremos a chave direta para encriptação em RAM, já que ela é segura do Keystore.
+        let mut undo_key = key;
+        for i in 0..32 { undo_key[i] ^= 0xAA; } // Ofuscação simples para diferenciar do storage
+
         let storage = StorageManager::new(path, key).ok();
         let engine = Self {
             static_root: TrieNode::default(),
@@ -46,6 +57,7 @@ impl KeyboardEngine {
             static_phrases: HashMap::new(),
             phrase_memory: RwLock::new(HashMap::new()),
             storage,
+            undo: UndoManager::new(undo_key),
         };
 
         let mut engine = engine;
