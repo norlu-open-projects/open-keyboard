@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "com.norlu.openkeyboard"
+    namespace = "lab.norlu.openkeyboard"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.norlu.openkeyboard"
+        applicationId = "lab.norlu.openkeyboard"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

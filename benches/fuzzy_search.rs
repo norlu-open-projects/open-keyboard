@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rustkey::engine::KeyboardEngine;
+use openkeyboard::engine::KeyboardEngine;
 
 fn bench_fuzzy_search(c: &mut Criterion) {
     let mut engine = KeyboardEngine::new();

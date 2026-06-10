@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Norlu Keyboard Core</string>
-    <string name="keyboard_name">Teclado Inteligente Norlu (Rust Engine)</string>
+    <string name="app_name">Open Keyboard</string>
+    <string name="keyboard_name">Norlu OpenKeyboard</string>
     <string name="subtype_pt_BR">Português (Brasil)</string>
 </resources>

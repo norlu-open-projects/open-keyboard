@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.norlu.openkeyboard">
+    package="lab.norlu.openkeyboard">
 
     <uses-permission android:name="android.permission.VIBRATE" />
 
@@ -26,7 +26,7 @@
 
         <activity
             android:name=".ui.settings.SettingsActivity"
-            android:label="Configurações do Teclado"
+            android:label="@string/app_name"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

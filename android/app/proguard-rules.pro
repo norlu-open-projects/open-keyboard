@@ -1,6 +1,6 @@
 # Impede a ofuscação das classes que fazem a ponte com o Rust (JNI)
--keep class com.norlu.openkeyboard.RustEngineAsync { *; }
--keep class com.norlu.openkeyboard.RustEngine { *; }
+-keep class lab.norlu.openkeyboard.RustEngineAsync { *; }
+-keep class lab.norlu.openkeyboard.RustEngine { *; }
 
 # Mantém todos os métodos nativos (external) intocados em qualquer classe
 -keepclasseswithmembernames class * {
