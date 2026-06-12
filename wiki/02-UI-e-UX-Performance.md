@@ -26,4 +26,14 @@ A alternância entre layouts Alpha e Numeric é feita via mudança de ponteiros 
 Para permitir que os pop-ups de previsualização de teclas "vazem" para fora do limite visual do teclado sem serem cortados pelo sistema de Views do Android:
 *   **Buffer Transparente**: Aumentamos a altura nominal da View (via `onMeasure`) em 100dp acima da barra de sugestões, mantendo esta área inicial transparente.
 *   **Coordinate Offsetting**: O desenho do teclado (Background e Teclas) e a lógica de detecção de toque são deslocados verticalmente por este valor.
-*   **Floating Pop-ups**: O método `drawPopup` utiliza este "céu" transparente para renderizar balões de visualização e menus de caracteres alternativos, criando um efeito de profundidade onde os elementos da UI parecem flutuar acima da interface do aplicativo.
+## 6. Arquitetura de Delegação Modular
+Para manter a manutenibilidade sem sacrificar a performance, a UI foi dividida em componentes especializados:
+*   **KeyboardRenderer**: Isola toda a complexidade de `Path` e `Canvas`.
+*   **KeyboardTouchHandler**: Gerencia a detecção de hitboxes dinâmicos e cronômetros de *long press*.
+*   **KeyboardThemeManager**: Centraliza a paleta de cores (AAA WCAG) e o cachê de métricas de texto (`textOffset`).
+
+## 7. Zero-Allocation Pass (Otimizações Extremas)
+A renderização e o tratamento de toques foram refinados para atingir alocação **quase zero** em tempo de execução:
+*   **Pre-computed Strings**: As variantes `upperChar` e `lowerChar` de cada tecla são pré-calculadas. O loop de desenho não aloca novas strings.
+*   **Index-Based Loops**: Substituímos iteradores funcionais (`forEach`, `map`) por loops `for` tradicionais baseados em índices, eliminando a criação de objetos `Iterator` efêmeros.
+*   **Cached Metrics**: Valores como o peso total da linha e o deslocamento vertical do texto são calculados apenas quando o estado ou o layout muda, nunca durante o frame de desenho.

@@ -7,7 +7,7 @@ use crate::core::KeyboardEngine;
 
 pub mod fuzzy;
 pub mod scoring;
-pub mod nwp;
+pub mod predictors;
 
 impl KeyboardEngine {
     /// Busca candidatos em ambas as Tries (estática e usuário) e calcula o score final.
@@ -16,66 +16,23 @@ impl KeyboardEngine {
         word: &str,
         context: &[String],
         max_distance: usize,
+        is_fast_typing: bool,
     ) -> Vec<(String, f64, usize, usize)> {
-        log::debug!("Search: Orquestrando busca para '{}' (contexto={:?}, dist={})", word, context, max_distance);
+        log::debug!("Search: Orquestrando busca para '{}' (contexto={:?}, dist={}, fast={})", 
+            word, context, max_distance, is_fast_typing);
         
         // Candidatos mapeados: Palavra -> (Distância, Frequência Base, Nível de Match Contextual)
         let mut candidates: HashMap<String, (usize, u32, usize)> = HashMap::new();
 
         if word.is_empty() {
-            nwp::predict_next_word(self, context, &mut candidates);
+            // Em digitação rápida, pulamos NWP profunda para economizar CPU e evitar poluição visual
+            if is_fast_typing {
+                log::debug!("Search: Cadence context (Fast Typing) - Bypassing NWP for optimization");
+            } else {
+                predictors::nwp::predict_next_word(self, context, &mut candidates);
+            }
         } else {
-            // --- WORD COMPLETION & FUZZY SEARCH ---
-            use crate::search::fuzzy::{search_prefix, search_recursive};
-            
-            let mut raw_candidates = Vec::new();
-            let current_row: Vec<usize> = (0..=word.len()).collect();
-
-            // 1. Busca por Prefixo (Completar) - Alta prioridade
-            search_prefix(&self.static_root, word, &mut raw_candidates);
-            if let Ok(user_trie) = self.user_root.read() {
-                search_prefix(&user_trie, word, &mut raw_candidates);
-            }
-
-            // 2. Busca Fuzzy (Correção)
-            for (ch, child) in &self.static_root.children {
-                search_recursive(child, *ch, word, &current_row, &mut String::new(), max_distance, &mut raw_candidates);
-            }
-            if let Ok(user_trie) = self.user_root.read() {
-                for (ch, child) in &user_trie.children {
-                    search_recursive(child, *ch, word, &current_row, &mut String::new(), max_distance, &mut raw_candidates);
-                }
-            }
-
-            for (cand, dist, freq) in raw_candidates {
-                let entry = candidates.entry(cand.clone()).or_insert((dist, 0, 0));
-                entry.1 = entry.1.max(freq);
-                entry.0 = entry.0.min(dist);
-
-                // Check context match for this candidate (Static + User Memory)
-                if !context.is_empty() {
-                    let user_phrases = self.phrase_memory.read().ok();
-
-                    if context.len() >= 2 {
-                        let trigram_key = format!("{} {}", context[context.len()-2], context[context.len()-1]);
-                        let match_static = self.static_phrases.get(trigram_key.as_str()).map_or(false, |l| l.iter().any(|p| p.0.as_ref() == cand));
-                        let match_user = user_phrases.as_ref().map_or(false, |up| up.get(&trigram_key).map_or(false, |l| l.iter().any(|p| p.0 == cand)));
-                        
-                        if match_static || match_user {
-                            entry.2 = entry.2.max(3);
-                        }
-                    }
-                    if entry.2 < 2 {
-                        let bigram_key = context[context.len()-1].clone();
-                        let match_static = self.static_phrases.get(bigram_key.as_str()).map_or(false, |l| l.iter().any(|p| p.0.as_ref() == cand));
-                        let match_user = user_phrases.as_ref().map_or(false, |up| up.get(&bigram_key).map_or(false, |l| l.iter().any(|p| p.0 == cand)));
-                        
-                        if match_static || match_user {
-                            entry.2 = entry.2.max(2);
-                        }
-                    }
-                }
-            }
+            predictors::completion::predict_completion(self, word, context, max_distance, &mut candidates);
         }
 
         // --- SCORING & FINAL RANKING ---

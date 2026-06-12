@@ -34,4 +34,8 @@ O vocabulário do usuário é persistido usando `sled` com encriptação de pont
 ## 6. Sistema de Undo Seguro (Encrypted Session Stack)
 O motor implementa um sistema de "Undo" focado em segurança máxima:
 *   **Encrypted LIFO Stack**: Armazena até 50 palavras em RAM.
-*   **Zeroize**: A memória é explicitamente preenchida com zeros ao final de cada sessão, garantindo que nenhum resíduo de texto persista na memória volátil.
+## 7. Integração JNI e Tipagem Forte (Kotlin Bridge)
+A comunicação entre o Android e o Rust foi refatorada para maximizar a resiliência e a performance:
+*   **NativeBridge**: Um objeto isolado que centraliza todas as chamadas `external`, garantindo que o carregamento da biblioteca e as assinaturas JNI estejam em um único ponto de falha controlado.
+*   **NativePointer**: Em vez de passar `Long` genéricos (que podem representar qualquer número), utilizamos uma `value class` que tipa o endereço de memória da engine. Isso impede erros de lógica onde um ID qualquer poderia ser passado como ponteiro.
+*   **Zero-Allocation Wrapper**: A ponte Kotlin foi projetada para ter custo zero de alocação de objetos no heap durante as chamadas frequentes de predição, utilizando tipos primitivos e classes inlined.

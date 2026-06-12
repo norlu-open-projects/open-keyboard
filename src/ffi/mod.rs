@@ -8,7 +8,7 @@ use log::LevelFilter;
 /// Inicializa o motor e retorna o ponteiro para o Kotlin/Java (persistência de estado).
 /// Recebe storage_path do context.filesDir e uma chave de 32 bytes do Android Keystore.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_initEngine(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_initEngine(
     mut env: JNIEnv,
     _class: JClass,
     storage_path: JString,
@@ -36,14 +36,29 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_initEn
     Box::into_raw(engine) as jlong
 }
 
+/// Define o contexto de domínio (App/InputType) para influenciar as predições.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_setDomainContext(
+    mut env: JNIEnv,
+    _class: JClass,
+    engine_ptr: jlong,
+    domain: JString,
+) {
+    if engine_ptr == 0 { return; }
+    let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
+    let domain_rust: String = env.get_string(&domain).map(|s| s.into()).unwrap_or_default();
+    engine.set_domain(&domain_rust);
+}
+
 /// Executa a busca inteligente usando o ponteiro persistido e contexto de palavras.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getSuggestions(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_getSuggestions(
     mut env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
     input: JString,
     context: JObjectArray,
+    is_fast_typing: jboolean,
 ) -> jobjectArray {
     let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
     
@@ -73,9 +88,10 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getSug
         _ => 2,     // 2 erros para palavras longas
     };
 
-    log::debug!("Rust getSuggestions for: '{}' (context={:?}, dyn_dist={})", input_rust, context_rust, max_distance);
+    log::debug!("Rust getSuggestions for: '{}' (context={:?}, dist={}, fast={})", 
+        input_rust, context_rust, max_distance, is_fast_typing != 0);
 
-    let results = engine.search_smart(&input_rust, &context_rust, max_distance);
+    let results = engine.search_smart(&input_rust, &context_rust, max_distance, is_fast_typing != 0);
     
     // Converte o Vec de resultados para um String[] do Java (Limitado a 10)
     let suggestions: Vec<String> = results.into_iter()
@@ -108,7 +124,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getSug
 
 /// Permite que o teclado aprenda uma nova palavra e sua frase de contexto.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_learnWord(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_learnWord(
     mut env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
@@ -137,7 +153,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_learnW
 
 /// Aciona a manutenção de entropia do motor (Poda profunda).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_runMaintenance(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_runMaintenance(
     _env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
@@ -149,7 +165,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_runMai
 
 /// Libera a memória do motor quando o serviço for destruído no Android.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_destroyEngine(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_destroyEngine(
     _env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
@@ -166,7 +182,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_destro
 
 /// Adição para suporte a Dynamic Hitboxes via JNI (WCAG AAA)
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getNextCharProbabilities(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_getNextCharProbabilities(
     mut env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
@@ -209,7 +225,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_getNex
 
 /// Pushes a word into the session undo stack.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_pushDeletedWord(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_pushDeletedWord(
     mut env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
@@ -225,7 +241,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_pushDe
 
 /// Pops the last word from the session undo stack.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_popDeletedWord(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_popDeletedWord(
     env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
@@ -246,7 +262,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_popDel
 
 /// Checks if there are any words in the undo stack.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_hasUndoItems(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_hasUndoItems(
     _env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
@@ -258,7 +274,7 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_hasUnd
 
 /// Clears the undo stack and zeroes the memory.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_RustEngineAsync_clearUndo(
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_clearUndo(
     _env: JNIEnv,
     _class: JClass,
     engine_ptr: jlong,
