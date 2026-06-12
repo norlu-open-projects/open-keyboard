@@ -2,110 +2,124 @@ package lab.norlu.openkeyboard.core
 
 import android.util.Log
 import kotlinx.coroutines.*
+import lab.norlu.openkeyboard.security.SecureKey
 
-class RustEngineAsync(private val storagePath: String, private val secureKey: ByteArray) {
-    private var nativeEnginePtr: Long = 0
-    private var isReady = false
+/**
+ * RustEngineAsync: Orquestrador de alto nível para o motor nativo.
+ * Gerencia a concorrência, o ciclo de vida do ponteiro e a segurança de tipos.
+ */
+class RustEngineAsync(private val storagePath: String, private val secureKey: SecureKey) {
     
-    // Escopo estruturado para gerenciar o ciclo de vida das operações nativas
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    @Volatile
+    private var ptr: NativePointer = NativePointer.NULL
+    private var pendingDomain: String? = null
+    
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     init {
-        // Inicializa o core nativo sem travar a Main Thread da UI
         scope.launch(Dispatchers.IO) {
             try {
-                System.loadLibrary("keyboard_engine")
-                nativeEnginePtr = initEngine(storagePath, secureKey)
-                isReady = true
-                Log.d("RustEngineAsync", "Native engine ready. Pointer: $nativeEnginePtr")
+                val rawPtr = NativeBridge.initEngine(storagePath, secureKey.bytes)
+                ptr = NativePointer(rawPtr)
+                Log.d("RustEngineAsync", "Motor nativo pronto. Pointer: ${ptr.raw}")
+                
+                // Aplica domínio pendente caso tenha sido definido antes do motor estar pronto
+                pendingDomain?.let { domain ->
+                    NativeBridge.setDomainContext(rawPtr, domain)
+                    pendingDomain = null
+                }
             } catch (e: Exception) {
-                Log.e("RustEngineAsync", "Failed to initialize native engine", e)
+                Log.e("RustEngineAsync", "Falha ao inicializar o motor nativo", e)
             }
         }
     }
 
-    fun getPredictions(text: String, context: Array<String>, callback: (Array<String>) -> Unit) {
-        if (!isReady || nativeEnginePtr == 0L) {
-            callback(emptyArray())
-            return
+    private inline fun <T> withEngine(crossinline block: (Long) -> T): T? {
+        val currentPtr = ptr
+        return if (currentPtr.isValid) {
+            block(currentPtr.raw)
+        } else {
+            null
         }
-        
+    }
+
+    fun setDomain(domain: String) {
+        val currentPtr = ptr
+        if (currentPtr.isValid) {
+            scope.launch(Dispatchers.IO) {
+                NativeBridge.setDomainContext(currentPtr.raw, domain)
+            }
+        } else {
+            pendingDomain = domain
+        }
+    }
+
+    fun getPredictions(text: String, context: Array<String>, isFastTyping: Boolean, callback: (Array<String>) -> Unit) {
         scope.launch {
             val results = withContext(Dispatchers.Default) {
-                getSuggestions(nativeEnginePtr, text, context)
+                withEngine { NativeBridge.getSuggestions(it, text, context, isFastTyping) } ?: emptyArray()
             }
             callback(results)
         }
     }
 
     fun learnWord(word: String, context: Array<String>) {
-        if (!isReady || nativeEnginePtr == 0L || word.isEmpty()) return
+        if (word.isEmpty()) return
         scope.launch(Dispatchers.Default) {
-            learnWord(nativeEnginePtr, word, context)
-        }
-    }
-
-    fun close() {
-        // Cancela todas as corotinas pendentes (buscas, aprendizado, etc)
-        scope.cancel()
-        
-        if (nativeEnginePtr != 0L) {
-            destroyEngine(nativeEnginePtr)
-            nativeEnginePtr = 0L
-            isReady = false
+            withEngine { NativeBridge.learnWord(it, word, context) }
         }
     }
 
     fun getNextCharProbabilities(prefix: String, callback: (Array<String>) -> Unit) {
-        if (!isReady || nativeEnginePtr == 0L) {
-            callback(emptyArray())
-            return
-        }
         scope.launch {
             val results = withContext(Dispatchers.Default) {
-                getNextCharProbabilities(nativeEnginePtr, prefix)
+                withEngine { NativeBridge.getNextCharProbabilities(it, prefix) } ?: emptyArray()
             }
             callback(results)
         }
     }
 
     fun runMaintenance(survivalThreshold: Double) {
-        if (!isReady || nativeEnginePtr == 0L) return
         scope.launch(Dispatchers.IO) {
-            runMaintenance(nativeEnginePtr, survivalThreshold)
+            withEngine { NativeBridge.runMaintenance(it, survivalThreshold) }
         }
     }
 
+    // --- Operações de Undo (Síncronas para garantir ordem correta no InputHandler) ---
+
     fun pushUndo(word: String) {
-        if (!isReady || nativeEnginePtr == 0L || word.isEmpty()) return
-        pushDeletedWord(nativeEnginePtr, word)
+        if (word.isEmpty()) return
+        withEngine { NativeBridge.pushDeletedWord(it, word) }
     }
 
     fun popUndo(): String {
-        if (!isReady || nativeEnginePtr == 0L) return ""
-        return popDeletedWord(nativeEnginePtr)
+        return withEngine { NativeBridge.popDeletedWord(it) } ?: ""
     }
 
     fun hasUndo(): Boolean {
-        if (!isReady || nativeEnginePtr == 0L) return false
-        return hasUndoItems(nativeEnginePtr)
+        return withEngine { NativeBridge.hasUndoItems(it) } ?: false
     }
 
     fun clearUndo() {
-        if (!isReady || nativeEnginePtr == 0L) return
-        clearUndo(nativeEnginePtr)
+        withEngine { NativeBridge.clearUndo(it) }
     }
 
-    private external fun initEngine(storagePath: String, secureKey: ByteArray): Long
-    private external fun getSuggestions(ptr: Long, text: String, context: Array<String>): Array<String>
-    private external fun learnWord(ptr: Long, word: String, context: Array<String>)
-    private external fun getNextCharProbabilities(ptr: Long, prefix: String): Array<String>
-    private external fun runMaintenance(ptr: Long, survivalThreshold: Double)
-    private external fun destroyEngine(ptr: Long)
-
-    private external fun pushDeletedWord(ptr: Long, word: String)
-    private external fun popDeletedWord(ptr: Long): String
-    private external fun hasUndoItems(ptr: Long): Boolean
-    private external fun clearUndo(ptr: Long)
+    fun close() {
+        scope.cancel()
+        val currentPtr = ptr
+        if (currentPtr.isValid) {
+            ptr = NativePointer.NULL
+            Log.i("RustEngineAsync", "Encerrando motor nativo...")
+            runBlocking {
+                withContext(Dispatchers.IO) {
+                    try {
+                        NativeBridge.destroyEngine(currentPtr.raw)
+                        Log.i("RustEngineAsync", "Motor nativo encerrado com sucesso.")
+                    } catch (e: Exception) {
+                        Log.e("RustEngineAsync", "Erro ao encerrar motor nativo", e)
+                    }
+                }
+            }
+        }
     }
-
+}
