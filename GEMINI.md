@@ -48,12 +48,12 @@ cd android
 
 ### Coding Style
 - **Rust:** Follow standard idiomatic Rust (Edition 2024). Avoid `unsafe` except in JNI FFI boundaries.
-- **Kotlin:** Use Coroutines for all native engine interactions to keep the UI thread responsive.
+- **Kotlin:** Use Coroutines for all native engine interactions. Adhere to **Zero-Allocation** standards in the `onDraw` and `onTouchEvent` paths. Use `Sealed Classes` and `Value Classes` for strict typing of internal states.
 
 ### FFI Guidelines
-- JNI functions must be defined in `src/ffi/mod.rs`.
-- Follow the naming convention `Java_com_norlu_openkeyboard_RustEngineAsync_<functionName>`.
-- Use `Box::into_raw` and `Box::from_raw` for managing the lifecycle of the `KeyboardEngine` pointer across the JNI boundary.
+- JNI functions are defined in `src/ffi/mod.rs` and bound to `lab.norlu.openkeyboard.core.NativeBridge`.
+- Use `NativePointer` (value class) to manage `KeyboardEngine` addresses safely.
+- Never pass raw `Long` addresses directly outside the `NativeBridge`/`RustEngineAsync` boundary.
 
 ### Storage & Security
 - Never store user data in plain text. Use the `storage` module which abstracts encryption.
