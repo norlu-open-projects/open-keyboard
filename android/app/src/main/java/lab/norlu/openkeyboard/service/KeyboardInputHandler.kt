@@ -54,13 +54,17 @@ class KeyboardInputHandler(
         }
     }
 
-    fun handleSpace(ic: InputConnection, isPredictionEnabled: Boolean, currentGhostText: String) {
+    fun handleSpace(ic: InputConnection, isPredictionEnabled: Boolean, currentGhostText: String, isAutocompleteSuppressed: Boolean) {
         isDeletingSequence = false
         val textBefore = ic.getTextBeforeCursor(100, 0) ?: ""
         val cleanLastWord = InputContextUtils.getCleanLastWord(textBefore)
         
         if (cleanLastWord.isNotEmpty()) {
-            rustEngine.learnWord(cleanLastWord, InputContextUtils.getCurrentContext(textBefore, skipLast = true))
+            if (isAutocompleteSuppressed) {
+                rustEngine.learnWordWithBoost(cleanLastWord, InputContextUtils.getCurrentContext(textBefore, skipLast = true), 20)
+            } else {
+                rustEngine.learnWord(cleanLastWord, InputContextUtils.getCurrentContext(textBefore, skipLast = true))
+            }
         }
 
         // Lógica de Autocorreção: Se houver Ghost Text, aceita a sugestão

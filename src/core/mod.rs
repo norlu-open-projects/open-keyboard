@@ -4,6 +4,9 @@
 pub mod undo;
 pub mod learning;
 pub mod maintenance;
+pub mod semantic;
+pub mod security;
+pub mod analytics;
 
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -13,6 +16,8 @@ use crate::trie::TrieNode;
 use crate::dictionary::load_default_dictionary;
 use crate::storage::StorageManager;
 use crate::core::undo::UndoManager;
+use crate::core::security::PrivacyManager;
+use crate::core::analytics::AnalyticsManager;
 
 pub struct KeyboardEngine {
     pub static_root: TrieNode,
@@ -24,8 +29,12 @@ pub struct KeyboardEngine {
     /// Memória de frases do usuário: Mesma estrutura que static_phrases
     pub phrase_memory: RwLock<HashMap<String, Vec<(String, u32)>>>,
     pub current_domain: RwLock<String>,
+    pub current_temporal_context: RwLock<String>,
+    pub current_semantic_topics: RwLock<Vec<String>>,
     pub storage: Option<StorageManager>,
     pub undo: UndoManager,
+    pub privacy_manager: PrivacyManager,
+    pub analytics: AnalyticsManager,
 }
 
 impl KeyboardEngine {
@@ -39,8 +48,12 @@ impl KeyboardEngine {
             static_phrases: HashMap::new(),
             phrase_memory: RwLock::new(HashMap::new()),
             current_domain: RwLock::new(String::new()),
+            current_temporal_context: RwLock::new(String::new()),
+            current_semantic_topics: RwLock::new(Vec::new()),
             storage: None,
             undo: UndoManager::new([0u8; 32]),
+            privacy_manager: PrivacyManager::new(),
+            analytics: AnalyticsManager::new(),
         };
         
         load_default_dictionary(&mut engine);
@@ -57,8 +70,12 @@ impl KeyboardEngine {
             static_phrases: HashMap::new(),
             phrase_memory: RwLock::new(HashMap::new()),
             current_domain: RwLock::new(String::new()),
+            current_temporal_context: RwLock::new(String::new()),
+            current_semantic_topics: RwLock::new(Vec::new()),
             storage: None,
             undo: UndoManager::new([0u8; 32]),
+            privacy_manager: PrivacyManager::new(),
+            analytics: AnalyticsManager::new(),
         }
     }
 
@@ -76,9 +93,15 @@ impl KeyboardEngine {
             static_phrases: HashMap::new(),
             phrase_memory: RwLock::new(HashMap::new()),
             current_domain: RwLock::new(String::new()),
+            current_temporal_context: RwLock::new(String::new()),
+            current_semantic_topics: RwLock::new(Vec::new()),
             storage: StorageManager::new(path, key).ok(),
             undo: UndoManager::new(undo_key),
+            privacy_manager: PrivacyManager::new(),
+            analytics: AnalyticsManager::new(),
         };
+
+        engine.analytics.load(&engine.storage);
 
         // Carrega o dicionário base (PT-BR)
         load_default_dictionary(&mut engine);
@@ -105,10 +128,18 @@ impl KeyboardEngine {
         self.flush();
     }
 
+    pub fn set_temporal_context(&self, context: &str) {
+        if let Ok(mut current) = self.current_temporal_context.write() {
+            *current = context.to_string();
+            log::debug!("Core: Contexto temporal definido para: {}", context);
+        }
+    }
+
     /// Garante que todos os dados pendentes sejam gravados no disco.
     pub fn flush(&self) {
         if let Some(ref mgr) = self.storage {
             log::info!("Core: Sincronizando banco de dados com o disco (Flush)...");
+            self.analytics.flush(&self.storage);
             let _ = mgr.flush();
         }
     }

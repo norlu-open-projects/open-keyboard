@@ -9,6 +9,10 @@ import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
+import java.util.Calendar
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 
 import lab.norlu.openkeyboard.core.RustEngineAsync
 import lab.norlu.openkeyboard.security.SecureKeyManager
@@ -51,17 +55,46 @@ class AdvancedKeyboardService : InputMethodService() {
                         variation == EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
                         variation == EditorInfo.TYPE_TEXT_VARIATION_WEB_PASSWORD
 
+        val isIncognito = isPassword || ((attribute?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0
+
         if (::predictionHandler.isInitialized) {
             predictionHandler.isPredictionEnabled = !isPassword
+        }
+        
+        rustEngine.setIncognitoMode(isIncognito)
+
+        if (::keyboardView.isInitialized) {
+            keyboardView.setIncognitoMode(isIncognito)
         }
 
         // Contexto de Domínio: App + Tipo de Entrada
         val domain = "${attribute?.packageName ?: "unknown"}:${attribute?.inputType ?: 0}"
         rustEngine.setDomain(domain)
 
+        updateTemporalContext()
+
         if (::keyboardView.isInitialized) {
             configureKeyboardView(attribute)
         }
+    }
+
+    private fun updateTemporalContext() {
+        val calendar = Calendar.getInstance()
+        val hour = calendar.get(Calendar.HOUR_OF_DAY)
+        val dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+        
+        val isWeekend = dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY
+        val dayPart = if (isWeekend) "WEEKEND" else "WEEKDAY"
+        
+        val timePart = when (hour) {
+            in 6..11 -> "MORNING"
+            in 12..17 -> "AFTERNOON"
+            in 18..23 -> "EVENING"
+            else -> "NIGHT"
+        }
+        
+        val temporalContext = "${dayPart}_${timePart}"
+        rustEngine.setTemporalContext(temporalContext)
     }
 
     private fun configureKeyboardView(attribute: EditorInfo?) {
@@ -128,8 +161,17 @@ class AdvancedKeyboardService : InputMethodService() {
             preferences.isDarkTheme = dark
         }
 
+        keyboardView.setOnSettingsPageChangedListener { page, day, shift ->
+            val filter = "${day}_${shift}"
+            GlobalScope.launch(Dispatchers.Main) {
+                val data = rustEngine.getAnalyticsData(page, filter)
+                keyboardView.setAnalyticsData(data)
+            }
+        }
+
         keyboardView.setOnSuggestionClickListener { suggestion ->
             triggerVibration()
+            val wasAutocompleteSuppressed = predictionHandler.isAutocompleteSuppressed
             inputHandler.isDeletingSequence = false
             currentInputConnection?.let { ic ->
                 val textBefore = ic.getTextBeforeCursor(100, 0) ?: ""
@@ -140,12 +182,25 @@ class AdvancedKeyboardService : InputMethodService() {
                     keyboardView.setUndoVisible(true)
                     ic.deleteSurroundingText(lastWord.length, 0)
                 }
+                
+                val keystrokesSaved = suggestion.length - lastWord.length
+                if (keystrokesSaved > 0) {
+                    rustEngine.incrementAnalytics("keystrokes", keystrokesSaved)
+                }
+                rustEngine.incrementAnalytics("method_fuzzy", 1)
+
                 ic.commitText("$suggestion ", 1)
                 
-                rustEngine.learnWord(suggestion, InputContextUtils.getCurrentContext(textBefore, skipLast = lastWord.isNotEmpty()))
+                val context = InputContextUtils.getCurrentContext(textBefore, skipLast = lastWord.isNotEmpty())
+                if (wasAutocompleteSuppressed && suggestion == lastWord.toString()) {
+                    rustEngine.learnWordWithBoost(suggestion, context, 20)
+                } else {
+                    rustEngine.learnWord(suggestion, context)
+                }
                 
                 predictionHandler.currentGhostText = ""
                 keyboardView.setGhostText("")
+                predictionHandler.isAutocompleteSuppressed = false
                 predictionHandler.updatePredictions(ic)
             }
         }
@@ -154,10 +209,23 @@ class AdvancedKeyboardService : InputMethodService() {
             triggerVibration()
             currentInputConnection?.let { ic ->
                 when (char) {
-                    "⌫" -> inputHandler.handleBackspace(ic)
-                    "\n" -> inputHandler.handleEnter(ic, currentInputEditorInfo)
-                    " " -> inputHandler.handleSpace(ic, predictionHandler.isPredictionEnabled, predictionHandler.currentGhostText)
-                    else -> inputHandler.handleText(ic, char)
+                    "⌫" -> {
+                        inputHandler.handleBackspace(ic)
+                        predictionHandler.isAutocompleteSuppressed = true
+                    }
+                    "\n" -> {
+                        inputHandler.handleEnter(ic, currentInputEditorInfo)
+                        predictionHandler.isAutocompleteSuppressed = false
+                    }
+                    " " -> {
+                        val wasSuppressed = predictionHandler.isAutocompleteSuppressed
+                        inputHandler.handleSpace(ic, predictionHandler.isPredictionEnabled, predictionHandler.currentGhostText, wasSuppressed)
+                        predictionHandler.isAutocompleteSuppressed = false
+                    }
+                    else -> {
+                        inputHandler.handleText(ic, char)
+                        predictionHandler.isAutocompleteSuppressed = false
+                    }
                 }
                 predictionHandler.updatePredictions(ic)
             }
@@ -172,6 +240,7 @@ class AdvancedKeyboardService : InputMethodService() {
             triggerVibration()
             currentInputConnection?.let { ic ->
                 inputHandler.performUndo(ic)
+                predictionHandler.isAutocompleteSuppressed = true
                 predictionHandler.updatePredictions(ic)
             }
         }
@@ -204,7 +273,7 @@ class AdvancedKeyboardService : InputMethodService() {
         if (::inputHandler.isInitialized) inputHandler.isDeletingSequence = false
         if (::keyboardView.isInitialized) {
             keyboardView.setUndoVisible(false)
-            keyboardView.setSuggestions(emptyArray())
+            keyboardView.setSuggestions(emptyArray<String>())
             keyboardView.setGhostText("")
         }
     }

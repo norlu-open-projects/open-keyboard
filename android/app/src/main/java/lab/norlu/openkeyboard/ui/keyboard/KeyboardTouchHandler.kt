@@ -31,6 +31,12 @@ class KeyboardTouchHandler(
     var imeAction: Int = EditorInfo.IME_ACTION_NONE
     var isUndoVisible = false
     var isSettingsOpen = false
+    var settingsPage = 0
+    var temporalShift = "MORNING"
+    var temporalDay = "WEEKDAY"
+    var isIncognito = false
+    var analyticsData: String = "Carregando..."
+    var onSettingsPageChanged: ((Int, String, String) -> Unit)? = null
     var ghostText: String = ""
     var nextCharProbabilities: Map<Char, Double> = emptyMap()
     var suggestions: List<SuggestionItem> = emptyList()
@@ -68,12 +74,67 @@ class KeyboardTouchHandler(
                 selectedAlternateIndex = -1 // -1 is the base key in the popup
                 view.invalidate()
             }
+        } else if (key is KeyboardKey.Symbols || key is KeyboardKey.Alpha || key is KeyboardKey.Numeric) {
+            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            isLongPressActive = true
+            longPressedKey = KeyboardKey.None // ACTION_UP não fará nada
+            
+            if (currentState == KeyboardState.NUMERIC_PAD) {
+                onKeyAction(KeyboardKey.Alpha)
+            } else {
+                onKeyAction(KeyboardKey.Numeric)
+            }
         }
     }
 
     fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                if (isSettingsOpen) {
+                    val totalHeight = view.height.toFloat() - topBuffer
+                    val suggestionBarHeight = totalHeight * 0.15f
+                    val top = suggestionBarHeight + topBuffer
+                    
+                    if (event.y > top) {
+                        val localY = event.y - top
+                        
+                        if (settingsPage > 0 && event.x < view.width * 0.2f) {
+                            settingsPage--
+                            onSettingsPageChanged?.invoke(settingsPage, temporalDay, temporalShift)
+                            view.invalidate()
+                            return true
+                        }
+                        if (settingsPage < 2 && event.x > view.width * 0.8f) {
+                            settingsPage++
+                            onSettingsPageChanged?.invoke(settingsPage, temporalDay, temporalShift)
+                            view.invalidate()
+                            return true
+                        }
+
+                        if (settingsPage == 2) {
+                            val h = totalHeight * 0.15f
+                            val dayBtnY = totalHeight * 0.2f
+                            val shiftBtnY = totalHeight * 0.4f
+                            
+                            if (localY in dayBtnY..(dayBtnY + h)) {
+                                temporalDay = if (event.x < view.width / 2f) "WEEKDAY" else "WEEKEND"
+                                onSettingsPageChanged?.invoke(settingsPage, temporalDay, temporalShift)
+                                view.invalidate()
+                                return true
+                            }
+                            
+                            if (localY in shiftBtnY..(shiftBtnY + h)) {
+                                temporalShift = if (event.x < view.width * 0.33f) "MORNING" 
+                                    else if (event.x < view.width * 0.66f) "AFTERNOON" 
+                                    else "NIGHT"
+                                onSettingsPageChanged?.invoke(settingsPage, temporalDay, temporalShift)
+                                view.invalidate()
+                                return true
+                            }
+                        }
+                    }
+                }
+
                 val key = resolveKeyAt(event.x, event.y)
                 pressedKey = key
                 isLongPressActive = false
@@ -81,8 +142,12 @@ class KeyboardTouchHandler(
                 longPressedKey = KeyboardKey.None
                 alternateOptions = emptyList()
 
-                if (key != KeyboardKey.None && (key is KeyboardKey.Backspace || (key is KeyboardKey.Text && KeyboardLayouts.alternatesMap.containsKey(key.char.uppercase())))) {
-                    longPressHandler.postDelayed(longPressRunnable, 150)
+                if (key != KeyboardKey.None) {
+                    if (key is KeyboardKey.Backspace || (key is KeyboardKey.Text && KeyboardLayouts.alternatesMap.containsKey(key.char.uppercase()))) {
+                        longPressHandler.postDelayed(longPressRunnable, 150)
+                    } else if (key is KeyboardKey.Symbols || key is KeyboardKey.Alpha || key is KeyboardKey.Numeric) {
+                        longPressHandler.postDelayed(longPressRunnable, 300)
+                    }
                 }
                 view.invalidate()
                 lastTouchTime = System.currentTimeMillis()
@@ -92,7 +157,9 @@ class KeyboardTouchHandler(
                     val popupWidth = pressedKeyRect.width() * 1.5f
                     val totalOptions = alternateOptions.size + 1
                     val fullPopupWidth = popupWidth * totalOptions
-                    val popupLeft = pressedKeyRect.centerX() - (fullPopupWidth / 2)
+                    var popupLeft = pressedKeyRect.centerX() - (fullPopupWidth / 2)
+                    if (popupLeft < 10f) popupLeft = 10f
+                    if (popupLeft + fullPopupWidth > view.width - 10f) popupLeft = view.width - fullPopupWidth - 10f
 
                     val relativeX = event.x - popupLeft
                     val index = (relativeX / popupWidth).toInt().coerceIn(0, totalOptions - 1)
@@ -225,24 +292,53 @@ class KeyboardTouchHandler(
 
                 if (currentState != KeyboardState.ALPHA || key !is KeyboardKey.Text) return key
 
+                val keyCenterY = topRow + (keyboardAreaHeight / 8f)
+                val keyCenterX = currentX + (keyWidth / 2f)
                 val baseProb = nextCharProbabilities[key.char.lowercase()[0]] ?: 0.0
-                val hitZoneLeft = currentX + (keyWidth * 0.20f)
-                val hitZoneRight = currentX + (keyWidth * 0.80f)
+                
+                // Cálculo Euclidiano: Distância Física combinada com Probabilidade Preditiva
+                val distanceToBase = Math.hypot((x - keyCenterX).toDouble(), (y - keyCenterY).toDouble())
+                var bestKey = key
+                var bestScore = (baseProb + 0.01) * (100.0 / (distanceToBase + 1.0)) // 0.01 baseline para lidar com probs zeradas
 
-                if (x < hitZoneLeft && i > 0) {
+                if (i > 0) {
                     val leftKey = keys[i - 1]
                     if (leftKey is KeyboardKey.Text) {
+                        val leftWeight = KeyboardLayouts.getKeyWeight(leftKey, currentState)
+                        val leftWidth = (availableWidth / totalWeight) * leftWeight
+                        val leftCenterX = currentX - (leftWidth / 2f)
                         val leftProb = nextCharProbabilities[leftKey.char.lowercase()[0]] ?: 0.0
-                        if (leftProb > baseProb * 3.0 && leftProb > 0.05) return leftKey
-                    }
-                } else if (x > hitZoneRight && i < keys.size - 1) {
-                    val rightKey = keys[i + 1]
-                    if (rightKey is KeyboardKey.Text) {
-                        val rightProb = nextCharProbabilities[rightKey.char.lowercase()[0]] ?: 0.0
-                        if (rightProb > baseProb * 3.0 && rightProb > 0.05) return rightKey
+                        
+                        val distToLeft = Math.hypot((x - leftCenterX).toDouble(), (y - keyCenterY).toDouble())
+                        val leftScore = (leftProb + 0.01) * (100.0 / (distToLeft + 1.0))
+                        
+                        // Exige um mínimo de probabilidade real (> 0.05) para roubar a colisão da vizinhança
+                        if (leftScore > bestScore && leftProb > 0.05) {
+                            bestScore = leftScore
+                            bestKey = leftKey
+                        }
                     }
                 }
-                return key
+
+                if (i < keys.size - 1) {
+                    val rightKey = keys[i + 1]
+                    if (rightKey is KeyboardKey.Text) {
+                        val rightWeight = KeyboardLayouts.getKeyWeight(rightKey, currentState)
+                        val rightWidth = (availableWidth / totalWeight) * rightWeight
+                        val rightCenterX = currentX + keyWidth + (rightWidth / 2f)
+                        val rightProb = nextCharProbabilities[rightKey.char.lowercase()[0]] ?: 0.0
+                        
+                        val distToRight = Math.hypot((x - rightCenterX).toDouble(), (y - keyCenterY).toDouble())
+                        val rightScore = (rightProb + 0.01) * (100.0 / (distToRight + 1.0))
+                        
+                        if (rightScore > bestScore && rightProb > 0.05) {
+                            bestScore = rightScore
+                            bestKey = rightKey
+                        }
+                    }
+                }
+                
+                return bestKey
             }
             currentX += keyWidth
         }

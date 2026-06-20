@@ -68,9 +68,28 @@ class OptimisedKeyboardView @JvmOverloads constructor(
         }
     }
 
+    fun setIncognitoMode(isIncognito: Boolean) {
+        touchHandler.isIncognito = isIncognito
+        invalidate()
+    }
+
     fun setGhostText(text: String) {
         touchHandler.ghostText = text
         invalidate()
+    }
+
+    fun setSuggestions(suggestions: Array<SuggestionItem>) {
+        touchHandler.suggestions = suggestions.toList()
+        invalidate()
+    }
+
+    fun setAnalyticsData(data: String) {
+        touchHandler.analyticsData = data
+        invalidate()
+    }
+
+    fun setOnSettingsPageChangedListener(listener: (Int, String, String) -> Unit) {
+        touchHandler.onSettingsPageChanged = listener
     }
 
     fun setSuggestions(list: Array<String>) {

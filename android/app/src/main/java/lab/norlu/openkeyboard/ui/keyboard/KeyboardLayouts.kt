@@ -52,10 +52,10 @@ object KeyboardLayouts {
     val alphaRow3 = listOf(KeyboardKey.Shift) + listOf("Z", "X", "C", "V", "B", "N", "M").map { KeyboardKey.Text(it) } + listOf(KeyboardKey.Backspace)
     val alphaRow4 = listOf(KeyboardKey.Symbols, KeyboardKey.Text(","), KeyboardKey.Space, KeyboardKey.Text("."), KeyboardKey.Search)
 
-    val symRow1 = listOf("[", "]", "{", "}", "/", "\\", "|", "^", "<", ">").map { KeyboardKey.Text(it) }
-    val symRow2 = listOf("@", "#", "$", "%", "&", "*", "-", "+", "=", "~").map { KeyboardKey.Text(it) }
-    val symRow3 = listOf("(", ")", "\"", "'", ":", ";", "!", "?").map { KeyboardKey.Text(it) }.toMutableList<KeyboardKey>().apply { add(KeyboardKey.Backspace) }
-    val symRow4 = listOf(KeyboardKey.Numeric, KeyboardKey.Text(","), KeyboardKey.Space, KeyboardKey.Text("."), KeyboardKey.Search)
+    val symRow1 = listOf("[", "]", "{", "}", "/", "\\", "|", "_", "<", ">").map { KeyboardKey.Text(it) }
+    val symRow2 = listOf("!", "@", "#", "$", "%", "^", "&", "*", "(", ")").map { KeyboardKey.Text(it) }
+    val symRow3 = listOf("-", "\"", ":", ";", ",", "?", "ª", "º").map { KeyboardKey.Text(it) }.toMutableList<KeyboardKey>().apply { add(KeyboardKey.Backspace) }
+    val symRow4 = listOf(KeyboardKey.Alpha, KeyboardKey.Text(","), KeyboardKey.Space, KeyboardKey.Text("."), KeyboardKey.Search)
 
     val padRow1 = listOf("1", "2", "3").map { KeyboardKey.Text(it) } + listOf(KeyboardKey.Backspace)
     val padRow2 = listOf("4", "5", "6", ",").map { KeyboardKey.Text(it) }
@@ -67,7 +67,8 @@ object KeyboardLayouts {
         "R" to listOf("4"), "T" to listOf("5"), "Y" to listOf("6"),
         "U" to listOf("7", "Ú"), "I" to listOf("8", "Í"), "O" to listOf("9", "Ó", "Õ", "Ô"),
         "P" to listOf("0"), "A" to listOf("Á", "À", "Ã", "Â"), "S" to listOf("@"),
-        "N" to listOf("!"), "G" to listOf("%"), "Z" to listOf("_"), "M" to listOf("?")
+        "D" to listOf(), "F" to listOf(), "G" to listOf("%"), "H" to listOf(), "J" to listOf(), "K" to listOf(), "L" to listOf(),
+        "Z" to listOf("_"), "X" to listOf(), "C" to listOf("Ç"), "V" to listOf(), "B" to listOf(), "N" to listOf("!"), "M" to listOf("?")
     )
 
     val hintMap = mapOf(

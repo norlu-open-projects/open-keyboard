@@ -30,9 +30,16 @@ impl KeyboardEngine {
                 log::debug!("Search: Cadence context (Fast Typing) - Bypassing NWP for optimization");
             } else {
                 predictors::nwp::predict_next_word(self, context, &mut candidates);
+                predictors::temporal::predict_temporal(self, &mut candidates);
+                // Topic Modeling Prediction (NWP Semântico)
+                predictors::topic::predict_topic(self, &mut candidates);
             }
         } else {
             predictors::completion::predict_completion(self, word, context, max_distance, &mut candidates);
+            predictors::temporal::apply_temporal_boost(self, &mut candidates);
+
+            // Topic Modeling Boost (Bônus Semântico)
+            predictors::topic::apply_topic_boost(self, &mut candidates);
         }
 
         // --- SCORING & FINAL RANKING ---
@@ -47,7 +54,7 @@ impl KeyboardEngine {
             
             // Penaliza distância no score final para predição de palavras (não NWP)
             // BÔNUS DE COMPLETION: Se a distância é 0, damos 2x mais relevância
-            let adjusted_score = if !word.is_empty() {
+            let mut adjusted_score = if !word.is_empty() {
                 if distance == 0 {
                     score * 2.0
                 } else {
@@ -56,6 +63,12 @@ impl KeyboardEngine {
             } else {
                 score
             };
+
+            // PENALIDADE DE REPETIÇÃO: Evita sugerir palavras que o usuário acabou de digitar
+            if context.iter().rev().take(3).any(|c| c == &candidate) {
+                adjusted_score *= 0.1; // Reduz o peso em 90%
+                log::debug!("Search: Repetition penalty applied to '{}' (score reduced to {})", candidate, adjusted_score);
+            }
 
             results.push((candidate, adjusted_score, distance, match_level));
         }

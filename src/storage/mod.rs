@@ -20,7 +20,7 @@ pub struct UserDataDelta {
 }
 
 pub struct StorageManager {
-    db: Db,
+    pub db: Db,
     // Chave de criptografia mantida em RAM (será zeroizada no drop)
     cipher_key: [u8; 32],
 }

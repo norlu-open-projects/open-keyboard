@@ -13,7 +13,9 @@ class RustEngineAsync(private val storagePath: String, private val secureKey: Se
     @Volatile
     private var ptr: NativePointer = NativePointer.NULL
     private var pendingDomain: String? = null
-    
+    private var pendingTemporalContext: String? = null
+    private var pendingSemanticContext: String? = null    
+    private var pendingIncognitoMode: Boolean? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     init {
@@ -27,6 +29,18 @@ class RustEngineAsync(private val storagePath: String, private val secureKey: Se
                 pendingDomain?.let { domain ->
                     NativeBridge.setDomainContext(rawPtr, domain)
                     pendingDomain = null
+                }
+                pendingTemporalContext?.let { context ->
+                    NativeBridge.setTemporalContext(rawPtr, context)
+                    pendingTemporalContext = null
+                }
+                pendingSemanticContext?.let { text ->
+                    NativeBridge.updateSemanticContext(rawPtr, text)
+                    pendingSemanticContext = null
+                }
+                pendingIncognitoMode?.let { mode ->
+                    NativeBridge.setIncognitoMode(rawPtr, mode)
+                    pendingIncognitoMode = null
                 }
             } catch (e: Exception) {
                 Log.e("RustEngineAsync", "Falha ao inicializar o motor nativo", e)
@@ -54,6 +68,58 @@ class RustEngineAsync(private val storagePath: String, private val secureKey: Se
         }
     }
 
+    fun setTemporalContext(context: String) {
+        val currentPtr = ptr
+        if (currentPtr.isValid) {
+            scope.launch(Dispatchers.IO) {
+                NativeBridge.setTemporalContext(currentPtr.raw, context)
+            }
+        } else {
+            pendingTemporalContext = context
+        }
+    }
+
+
+    fun updateSemanticContext(text: String) {
+        val currentPtr = ptr
+        if (currentPtr.isValid) {
+            scope.launch(Dispatchers.Default) { // Default for CPU parsing if needed before JNI, though JNI takes it
+                NativeBridge.updateSemanticContext(currentPtr.raw, text)
+            }
+        } else {
+            pendingSemanticContext = text
+        }
+    }
+
+    fun setIncognitoMode(isIncognito: Boolean) {
+        val currentPtr = ptr
+        if (currentPtr.isValid) {
+            scope.launch(Dispatchers.IO) {
+                NativeBridge.setIncognitoMode(currentPtr.raw, isIncognito)
+            }
+        } else {
+            pendingIncognitoMode = isIncognito
+        }
+    }
+
+    fun incrementAnalytics(category: String, value: Int) {
+        val currentPtr = ptr
+        if (currentPtr.isValid) {
+            scope.launch(Dispatchers.IO) {
+                NativeBridge.incrementAnalytics(currentPtr.raw, category, value)
+            }
+        }
+    }
+
+    suspend fun getAnalyticsData(page: Int, filter: String): String = withContext(Dispatchers.IO) {
+        val currentPtr = ptr
+        if (currentPtr.isValid) {
+            NativeBridge.getAnalyticsData(currentPtr.raw, page, filter)
+        } else {
+            "{}"
+        }
+    }
+
     fun getPredictions(text: String, context: Array<String>, isFastTyping: Boolean, callback: (Array<String>) -> Unit) {
         scope.launch {
             val results = withContext(Dispatchers.Default) {
@@ -67,6 +133,13 @@ class RustEngineAsync(private val storagePath: String, private val secureKey: Se
         if (word.isEmpty()) return
         scope.launch(Dispatchers.Default) {
             withEngine { NativeBridge.learnWord(it, word, context) }
+        }
+    }
+
+    fun learnWordWithBoost(word: String, context: Array<String>, boost: Int) {
+        if (word.isEmpty()) return
+        scope.launch(Dispatchers.Default) {
+            withEngine { NativeBridge.learnWordWithBoost(it, word, context, boost) }
         }
     }
 

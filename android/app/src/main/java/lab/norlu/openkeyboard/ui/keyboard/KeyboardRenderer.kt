@@ -159,26 +159,83 @@ class KeyboardRenderer(
         val centerX = view.width / 2f
         theme.textPaint.textSize = 42f
         theme.textPaint.isFakeBoldText = true
-        canvas.drawText("OPÇÕES DO TECLADO", centerX, top + 70f, theme.textPaint)
+
+        val title = when (touchHandler.settingsPage) {
+            0 -> "OPÇÕES DO TECLADO"
+            1 -> "VISÃO GERAL"
+            else -> "DISTRIBUIÇÃO TEMPORAL"
+        }
+        canvas.drawText(title, centerX, top + 70f, theme.textPaint)
+
+        // Botões de Paginação < e >
+        theme.textPaint.textSize = 60f
+        if (touchHandler.settingsPage > 0) {
+            canvas.drawText("<", view.width * 0.08f, top + totalHeight / 2f, theme.textPaint)
+        }
+        if (touchHandler.settingsPage < 2) {
+            canvas.drawText(">", view.width * 0.92f, top + totalHeight / 2f, theme.textPaint)
+        }
+
+        theme.textPaint.textSize = 36f
 
         val btnWidth = view.width * 0.8f
         val btnHeight = 120f
         val btnX = (view.width - btnWidth) / 2f
 
-        // Botão Tema Claro
-        keyRect.set(btnX, top + 150f, btnX + btnWidth, top + 150f + btnHeight)
-        theme.keyPaint.color = if (!theme.isDark) theme.colorHighlight else theme.colorFunctionKey
-        canvas.drawRoundRect(keyRect, 16f, 16f, theme.keyPaint)
-        theme.textPaint.color = if (!theme.isDark) 0xFFFFFFFF.toInt() else theme.colorText
-        theme.textPaint.textSize = 36f
-        canvas.drawText("TEMA CLARO (AAA)", centerX, keyRect.centerY() + 12f, theme.textPaint)
+        if (touchHandler.settingsPage == 0) {
+            // Botão Tema Claro
+            keyRect.set(btnX, top + 150f, btnX + btnWidth, top + 150f + btnHeight)
+            theme.keyPaint.color = if (!theme.isDark) theme.colorHighlight else theme.colorFunctionKey
+            canvas.drawRoundRect(keyRect, 16f, 16f, theme.keyPaint)
+            theme.textPaint.color = if (!theme.isDark) 0xFFFFFFFF.toInt() else theme.colorText
+            canvas.drawText("TEMA CLARO (AAA)", centerX, keyRect.centerY() + 12f, theme.textPaint)
 
-        // Botão Tema Escuro
-        keyRect.set(btnX, top + 150f + btnHeight + 30f, btnX + btnWidth, top + 150f + (btnHeight * 2) + 30f)
-        theme.keyPaint.color = if (theme.isDark) theme.colorHighlight else theme.colorFunctionKey
-        canvas.drawRoundRect(keyRect, 16f, 16f, theme.keyPaint)
-        theme.textPaint.color = if (theme.isDark) 0xFFFFFFFF.toInt() else theme.colorText
-        canvas.drawText("TEMA ESCURO (AAA)", centerX, keyRect.centerY() + 12f, theme.textPaint)
+            // Botão Tema Escuro
+            keyRect.set(btnX, top + 150f + btnHeight + 30f, btnX + btnWidth, top + 150f + (btnHeight * 2) + 30f)
+            theme.keyPaint.color = if (theme.isDark) theme.colorHighlight else theme.colorFunctionKey
+            canvas.drawRoundRect(keyRect, 16f, 16f, theme.keyPaint)
+            theme.textPaint.color = if (theme.isDark) 0xFFFFFFFF.toInt() else theme.colorText
+            canvas.drawText("TEMA ESCURO (AAA)", centerX, keyRect.centerY() + 12f, theme.textPaint)
+        } else if (touchHandler.settingsPage == 1) {
+            theme.textPaint.color = theme.colorText
+            theme.textPaint.textSize = 32f
+            canvas.drawText(touchHandler.analyticsData, centerX, top + 150f + btnHeight, theme.textPaint)
+        } else if (touchHandler.settingsPage == 2) {
+            val dayBtnY = top + totalHeight * 0.2f
+            val shiftBtnY = top + totalHeight * 0.4f
+            val h = totalHeight * 0.15f
+            
+            theme.keyPaint.color = if (touchHandler.temporalDay == "WEEKDAY") theme.colorHighlight else theme.colorFunctionKey
+            canvas.drawRoundRect(btnX, dayBtnY, centerX - 10f, dayBtnY + h, 16f, 16f, theme.keyPaint)
+            theme.textPaint.color = if (touchHandler.temporalDay == "WEEKDAY") 0xFFFFFFFF.toInt() else theme.colorText
+            canvas.drawText("DIAS ÚTEIS", btnX + (centerX - 10f - btnX)/2f, dayBtnY + h/2f + 12f, theme.textPaint)
+            
+            theme.keyPaint.color = if (touchHandler.temporalDay == "WEEKEND") theme.colorHighlight else theme.colorFunctionKey
+            canvas.drawRoundRect(centerX + 10f, dayBtnY, btnX + btnWidth, dayBtnY + h, 16f, 16f, theme.keyPaint)
+            theme.textPaint.color = if (touchHandler.temporalDay == "WEEKEND") 0xFFFFFFFF.toInt() else theme.colorText
+            canvas.drawText("FIM DE SEMANA", centerX + 10f + (btnWidth/2f - 10f)/2f, dayBtnY + h/2f + 12f, theme.textPaint)
+
+            val third = btnWidth / 3f
+            theme.keyPaint.color = if (touchHandler.temporalShift == "MORNING") theme.colorHighlight else theme.colorFunctionKey
+            canvas.drawRoundRect(btnX, shiftBtnY, btnX + third - 10f, shiftBtnY + h, 16f, 16f, theme.keyPaint)
+            theme.textPaint.color = if (touchHandler.temporalShift == "MORNING") 0xFFFFFFFF.toInt() else theme.colorText
+            theme.textPaint.textSize = 28f
+            canvas.drawText("MANHÃ", btnX + (third - 10f)/2f, shiftBtnY + h/2f + 10f, theme.textPaint)
+
+            theme.keyPaint.color = if (touchHandler.temporalShift == "AFTERNOON") theme.colorHighlight else theme.colorFunctionKey
+            canvas.drawRoundRect(btnX + third + 5f, shiftBtnY, btnX + 2*third - 5f, shiftBtnY + h, 16f, 16f, theme.keyPaint)
+            theme.textPaint.color = if (touchHandler.temporalShift == "AFTERNOON") 0xFFFFFFFF.toInt() else theme.colorText
+            canvas.drawText("TARDE", btnX + third + 5f + (third - 10f)/2f, shiftBtnY + h/2f + 10f, theme.textPaint)
+
+            theme.keyPaint.color = if (touchHandler.temporalShift == "NIGHT") theme.colorHighlight else theme.colorFunctionKey
+            canvas.drawRoundRect(btnX + 2*third + 10f, shiftBtnY, btnX + btnWidth, shiftBtnY + h, 16f, 16f, theme.keyPaint)
+            theme.textPaint.color = if (touchHandler.temporalShift == "NIGHT") 0xFFFFFFFF.toInt() else theme.colorText
+            canvas.drawText("NOITE", btnX + 2*third + 10f + (third - 10f)/2f, shiftBtnY + h/2f + 10f, theme.textPaint)
+
+            theme.textPaint.textSize = 36f
+            theme.textPaint.color = theme.colorText
+            canvas.drawText(touchHandler.analyticsData, centerX, shiftBtnY + h + 80f, theme.textPaint)
+        }
 
         // Botão Fechar
         keyRect.set(btnX, top + totalHeight - 100f, btnX + btnWidth, top + totalHeight - 20f)
@@ -261,7 +318,16 @@ class KeyboardRenderer(
                 is KeyboardKey.Alpha -> {
                     canvas.drawText("ABC", keyRect.centerX(), textCenterY, theme.textPaint)
                 }
-                is KeyboardKey.Space -> { /* Space is empty background */ }
+                is KeyboardKey.Space -> { 
+                    if (touchHandler.isIncognito) {
+                        theme.textPaint.color = theme.colorGhost
+                        val originalSize = theme.textPaint.textSize
+                        theme.textPaint.textSize = rowHeight * 0.4f
+                        canvas.drawText("👻", keyRect.centerX(), textCenterY, theme.textPaint)
+                        theme.textPaint.textSize = originalSize
+                        theme.textPaint.color = theme.colorText
+                    }
+                }
                 else -> { /* Other keys */ }
             }
 

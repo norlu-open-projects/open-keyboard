@@ -50,6 +50,34 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_setDomain
     engine.set_domain(&domain_rust);
 }
 
+/// Define o contexto temporal (ex: WEEKDAY_MORNING) para influenciar as predições.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_setTemporalContext(
+    mut env: JNIEnv,
+    _class: JClass,
+    engine_ptr: jlong,
+    context: JString,
+) {
+    if engine_ptr == 0 { return; }
+    let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
+    let context_rust: String = env.get_string(&context).map(|s| s.into()).unwrap_or_default();
+    engine.set_temporal_context(&context_rust);
+}
+
+/// Envia texto longo para extração assíncrona de contexto semântico.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_updateSemanticContext(
+    mut env: JNIEnv,
+    _class: JClass,
+    engine_ptr: jlong,
+    text: JString,
+) {
+    if engine_ptr == 0 { return; }
+    let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
+    let text_rust: String = env.get_string(&text).map(|s| s.into()).unwrap_or_default();
+    engine.update_semantic_context(&text_rust);
+}
+
 /// Executa a busca inteligente usando o ponteiro persistido e contexto de palavras.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_getSuggestions(
@@ -151,6 +179,37 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_learnWord
     }
 }
 
+/// Permite que o teclado aprenda uma palavra corrigida manualmente com alta prioridade.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_learnWordWithBoost(
+    mut env: JNIEnv,
+    _class: JClass,
+    engine_ptr: jlong,
+    word: JString,
+    context: JObjectArray,
+    boost: i32,
+) {
+    if engine_ptr == 0 { return; }
+    let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
+    let word_rust: String = env.get_string(&word).map(|s| s.into()).unwrap_or_default();
+    
+    let mut context_rust = Vec::new();
+    let len = env.get_array_length(&context).unwrap_or(0);
+    for i in 0..len {
+        if let Ok(obj) = env.get_object_array_element(&context, i) {
+            let j_str: JString = obj.into();
+            if let Ok(s) = env.get_string(&j_str) {
+                context_rust.push(s.into());
+            }
+        }
+    }
+
+    if !word_rust.is_empty() {
+        let b = if boost > 0 { boost as u32 } else { 1 };
+        engine.learn_word_with_boost(&word_rust, &context_rust, b);
+    }
+}
+
 /// Aciona a manutenção de entropia do motor (Poda profunda).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_runMaintenance(
@@ -221,6 +280,79 @@ pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_getNextCh
     }
 
     array.into_raw()
+}
+
+/// Define o estado do Modo Incógnito (Segurança/Privacidade).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_setIncognitoMode(
+    _env: JNIEnv,
+    _class: JClass,
+    engine_ptr: jlong,
+    is_incognito: jboolean,
+) {
+    if engine_ptr == 0 { return; }
+    let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
+    engine.privacy_manager.set_incognito(is_incognito != 0);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_incrementAnalytics(
+    mut env: JNIEnv,
+    _class: JClass,
+    engine_ptr: jlong,
+    category: JString,
+    value: i32,
+) {
+    if engine_ptr == 0 { return; }
+    let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
+    let cat_rust: String = env.get_string(&category).map(|s| s.into()).unwrap_or_default();
+    
+    if cat_rust == "keystrokes" {
+        engine.analytics.increment_keystrokes(value as u32);
+    } else if cat_rust == "method" {
+        // Here value isn't used, we use the method name if it were a string, but since we passed string category, wait.
+        // Actually we can pass category="method_topic" and value=1
+        engine.analytics.increment_method(&cat_rust.replace("method_", ""));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn Java_lab_norlu_openkeyboard_core_NativeBridge_getAnalyticsData(
+    mut env: JNIEnv,
+    _class: JClass,
+    engine_ptr: jlong,
+    page: i32,
+    filter: JString,
+) -> jstring {
+    if engine_ptr == 0 { return env.new_string("{}").unwrap().into_raw(); }
+    let engine = unsafe { &*(engine_ptr as *const KeyboardEngine) };
+    let filter_rust: String = env.get_string(&filter).map(|s| s.into()).unwrap_or_default();
+    
+    let json_result = if page == 1 {
+        // General Stats
+        let ks = engine.analytics.keystrokes_saved.load(std::sync::atomic::Ordering::SeqCst);
+        let top = engine.analytics.methods_won_topic.load(std::sync::atomic::Ordering::SeqCst);
+        let temp = engine.analytics.methods_won_temporal.load(std::sync::atomic::Ordering::SeqCst);
+        let fuz = engine.analytics.methods_won_fuzzy.load(std::sync::atomic::Ordering::SeqCst);
+        format!(r#"{{"keystrokes":{},"topic":{},"temporal":{},"fuzzy":{}}}"#, ks, top, temp, fuz)
+    } else if page == 2 {
+        // Temporal Distribution (top words for the given filter, e.g. "WEEKDAY_MORNING")
+        // We look at `phrase_memory` for `__time__:filter`
+        let mut top_words = Vec::new();
+        if let Ok(memory) = engine.phrase_memory.read() {
+            let key = format!("__time__:{}", filter_rust);
+            if let Some(list) = memory.get(&key) {
+                let mut sorted = list.clone();
+                sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                top_words = sorted.into_iter().take(3).map(|(w, f)| format!(r#"{{"word":"{}","freq":{}}}"#, w, f)).collect();
+            }
+        }
+        format!(r#"[{}]"#, top_words.join(","))
+    } else {
+        "{}".to_string()
+    };
+    
+    env.new_string(json_result).unwrap_or_else(|_| env.new_string("{}").unwrap()).into_raw()
 }
 
 /// Pushes a word into the session undo stack.

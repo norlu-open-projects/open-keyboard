@@ -11,6 +11,8 @@ class KeyboardPredictionHandler(
 ) {
     var currentGhostText = ""
     var isPredictionEnabled = true
+    var isAutocompleteSuppressed = false
+    private var lastSemanticExtractionTime = 0L
 
     /**
      * Atualiza as sugestões e as hitboxes dinâmicas baseadas no texto atual.
@@ -24,21 +26,46 @@ class KeyboardPredictionHandler(
         val context = InputContextUtils.getCurrentContext(textBefore, skipLast = currentWord.isNotEmpty())
         val isFastTyping = keyboardView.isFastTyping
 
+        // Topic Modeling (Semantic Context) Debounce Logic
+        if (currentWord.isEmpty()) {
+            val now = System.currentTimeMillis()
+            if (now - lastSemanticExtractionTime > 3000) {
+                lastSemanticExtractionTime = now
+                val longText = ic.getTextBeforeCursor(2000, 0)?.toString() ?: ""
+                rustEngine.updateSemanticContext(longText)
+            }
+        }
+
         // 1. Busca predições (Candidate Bar e Ghost Text)
         rustEngine.getPredictions(currentWord.toString(), context, isFastTyping) { suggestions: Array<String> ->
-            keyboardView.setSuggestions(suggestions)
+            val finalSuggestions = if (isAutocompleteSuppressed && currentWord.isNotEmpty()) {
+                val list = suggestions.toMutableList()
+                // Remove a palavra exata caso já exista
+                list.removeAll { it.substringBefore(':').equals(currentWord.toString(), ignoreCase = true) }
+                // Garante que existam pelo menos 2 itens para ocupar o 3º slot (índice 2)
+                while (list.size < 2) { list.add("") }
+                if (list.size > 2) {
+                    list.add(2, currentWord.toString())
+                } else {
+                    list.add(currentWord.toString())
+                }
+                list.toTypedArray()
+            } else {
+                suggestions
+            }
+            keyboardView.setSuggestions(finalSuggestions)
             
-            val rawTopSuggestion = suggestions.getOrNull(0) ?: ""
+            val rawTopSuggestion = finalSuggestions.getOrNull(0) ?: ""
             val colonIndex = rawTopSuggestion.indexOf(':')
             val topSuggestionWord = if (colonIndex != -1) rawTopSuggestion.substring(0, colonIndex) else rawTopSuggestion
             
             // Verifica se a sugestão principal é apenas um sufixo do que está sendo digitado
-            val isExactMatch = suggestions.any { sug ->
+            val isExactMatch = finalSuggestions.any { sug ->
                 val word = if (sug.contains(':')) sug.split(':')[0] else sug
                 word.equals(currentWord.toString(), ignoreCase = true)
             }
             
-            if (topSuggestionWord.startsWith(currentWord, ignoreCase = true) && 
+            if (!isAutocompleteSuppressed && topSuggestionWord.startsWith(currentWord.toString(), ignoreCase = true) && 
                 currentWord.length >= 2 && 
                 !isExactMatch) {
                 
